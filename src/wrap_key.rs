@@ -1,6 +1,7 @@
 use rust_util::{opt_result, simple_error, XResult};
 use serde::{Deserialize, Serialize};
-use crate::util::decode_base64_url_no_pad;
+
+use crate::util::{decode_base64_url_no_pad, encode_base64_url_no_pad};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +20,19 @@ pub struct WrapKeyHeader {
 }
 
 impl WrapKey {
+    pub fn encode(&self) -> XResult<String> {
+        let mut buf = String::with_capacity(512);
+        buf.push_str("WK:");
+        let header = serde_json::to_string(&self.header)?;
+        let header_str = encode_base64_url_no_pad(header.as_bytes());
+        buf.push_str(&header_str);
+        buf.push('.');
+        buf.push_str(&encode_base64_url_no_pad(&self.nonce));
+        buf.push('.');
+        buf.push_str(&encode_base64_url_no_pad(&self.encrypted_data));
+        Ok(buf)
+    }
+
     pub fn parse(wk: &str) -> XResult<WrapKey> {
         if !wk.starts_with("WK:") {
             return simple_error!("Wrap key string must starts with WK:");
@@ -57,4 +71,13 @@ fn test_parse_wrap_key() {
     assert_eq!("6e297ceb7294b257fb9f31ec", hex::encode(&wrap_key.nonce));
     assert_eq!("551db879aa274d26671ecf215a9e103fee518c57191f78bb57bf43899747b829f1cb2c1fc3875a5ae273\
     620a2ec42044", hex::encode(&wrap_key.encrypted_data));
+
+    let encoded = wrap_key.encode().unwrap();
+    let reparsed_wrap_key = WrapKey::parse(&encoded).unwrap();
+    assert_eq!("aes256-gcm-p256", reparsed_wrap_key.header.enc);
+    assert_eq!("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEpLKypsShJvVRx-1hfZF2p9czIFpjp_DLILMF9Z8U9YqFDTZMd\
+    NBCty4RlXmIhHZILUOZLYotn4tBazZwgVG7jQ", reparsed_wrap_key.header.e_pub_key);
+    assert_eq!("6e297ceb7294b257fb9f31ec", hex::encode(&reparsed_wrap_key.nonce));
+    assert_eq!("551db879aa274d26671ecf215a9e103fee518c57191f78bb57bf43899747b829f1cb2c1fc3875a5ae273\
+    620a2ec42044", hex::encode(&reparsed_wrap_key.encrypted_data));
 }

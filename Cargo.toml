@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "0.0.3"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -8,7 +8,6 @@ description = "A simple and tiny file encrypt tool"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-aes-gcm = { version = "0.10.1", features = ["zeroize"] }
 aes-gcm-stream = "0.2.0"
 base64 = "0.21.0"
 chrono = "0.4.23"
@@ -17,7 +16,7 @@ flate2 = "1.0.27"
 hex = "0.4.3"
 openpgp-card = "0.3.7"
 openpgp-card-pcsc = "0.3.0"
-p256 = { version = "0.13.2", features = ["pem", "ecdh"] }
+p256 = { version = "0.13.2", features = ["pem", "ecdh", "pkcs8"] }
 rand = "0.8.5"
 reqwest = { version = "0.11.14", features = ["blocking", "rustls", "rustls-tls"] }
 rpassword = "7.2.0"
@@ -30,6 +29,7 @@ simpledateformat = "0.1.4"
 x509-parser = "0.15.1"
 yubico_manager = "0.9.0"
 yubikey = { version = "0.8.0", features = ["untested"] }
+zeroize = "1.6.0"
 
 [profile.release]
 codegen-units = 1

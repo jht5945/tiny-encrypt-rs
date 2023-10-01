@@ -1,15 +1,13 @@
 # tiny-encrypt-rs
 
+**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or CanoKey(https://www.canokeys.org/) is required.
+
 Tiny encrypt for Rust
 
-> Tiny encrypt rs is a Rust implementation of Tiny encrypt java https://git.hatter.ink/hatter/tiny-encrypt-java
+> Tiny encrypt rs is a Rust implementation of Tiny encrypt java https://git.hatter.ink/hatter/tiny-encrypt-java <br>
 > Tiny encrypt spec see: https://github.com/OpenWebStandard/tiny-encrypt-format-spec
 
 Repository address: https://git.hatter.ink/hatter/tiny-encrypt-rs mirror https://github.com/jht5945/tiny-encrypt-rs
-
-TODOs:
-
-* Encrypt subcommand
 
 <br>
 
@@ -42,3 +40,27 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
   }
 }
 ```
+
+Smart Card(Yubikey) protected ECDH Encryption description:
+
+```text
+┌───────────────────┐                     ┌───────────────────────────┐
+│Tiny Encrypt       │                     │Smart Card (Yubikey)       │
+│                   │  Get Public Key(P)  │                           │
+│                   │ ◄───────────────────┤ Private Key(d)            │
+│                   │                     │ P = dG                    │
+│                   │ Temp Private Key(k) │                           │
+└───────────────────┘ Q = kG              └───────────────────────────┘
+
+                      Shared Secret = kP = kdG
+
+                      Store Q, Encrypt using derived key from Shared Secret
+
+
+                      Send Q to Smart Card
+                      ───────────────────►
+                                          Shared Secret = dQ = kdG
+
+                               Decrypt using derived key from restored Shared Secret
+```
+

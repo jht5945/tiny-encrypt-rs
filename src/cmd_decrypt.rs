@@ -1,13 +1,14 @@
-use std::fs;
+use std::{fs, io};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::Instant;
 
 use clap::Args;
 use openpgp_card::crypto_data::Cryptogram;
 use openpgp_card::OpenPgp;
-use rust_util::{debugging, failure, opt_result, simple_error, success, util_term, XResult};
+use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_term, warning, XResult};
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
 use yubikey::piv::{AlgorithmId, decrypt_data, RetiredSlotId, SlotId};
@@ -18,7 +19,7 @@ use crate::card::get_card;
 use crate::compress::GzStreamDecoder;
 use crate::crypto_aes::aes_gcm_decrypt;
 use crate::spec::{TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{decode_base64, decode_base64_url_no_pad, ENC_AES256_GCM_P256, simple_kdf, TINY_ENC_FILE_EXT};
+use crate::util::{ENC_AES256_GCM_P256, TINY_ENC_FILE_EXT};
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -26,17 +27,20 @@ pub struct CmdDecrypt {
     /// Files need to be decrypted
     pub paths: Vec<PathBuf>,
     /// PIN
-    #[arg(long)]
+    #[arg(long, short = 'p')]
     pub pin: Option<String>,
-    /// SLOT
-    #[arg(long)]
+    /// Slot
+    #[arg(long, short = 's')]
     pub slot: Option<String>,
+    /// Remove source file
+    #[arg(long, short = 'R')]
+    pub remove_file: bool,
 }
 
 pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     debugging!("Cmd decrypt: {:?}", cmd_decrypt);
     for path in &cmd_decrypt.paths {
-        match decrypt_single(path, &cmd_decrypt.pin, &cmd_decrypt.slot) {
+        match decrypt_single(path, &cmd_decrypt.pin, &cmd_decrypt.slot, &cmd_decrypt) {
             Ok(_) => success!("Decrypt {} succeed", path.to_str().unwrap_or("N/A")),
             Err(e) => failure!("Decrypt {} failed: {}", path.to_str().unwrap_or("N/A"), e),
         }
@@ -44,31 +48,42 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     Ok(())
 }
 
-pub fn decrypt_single(path: &PathBuf, pin: &Option<String>, slot: &Option<String>) -> XResult<()> {
+pub fn decrypt_single(path: &PathBuf, pin: &Option<String>, slot: &Option<String>, cmd_decrypt: &CmdDecrypt) -> XResult<()> {
     let path_display = format!("{}", path.display());
-    if !path_display.ends_with(TINY_ENC_FILE_EXT) {
-        return simple_error!("File is not tiny encrypt file: {}", &path_display);
-    }
+    util::require_tiny_enc_file_and_exists(path)?;
+
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
     let meta = opt_result!(file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
+    debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
 
     let path_out = &path_display[0..path_display.len() - TINY_ENC_FILE_EXT.len()];
-    if let Ok(_) = fs::metadata(path_out) {
-        return simple_error!("Output file: {} exists", path_out);
-    }
+    util::require_file_not_exists(path_out)?;
 
-    debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
     let selected_envelop = select_envelop(&meta)?;
 
     let key = try_decrypt_key(selected_envelop, pin, slot)?;
-    let nonce = opt_result!( decode_base64(&meta.nonce), "Decode nonce failed: {}");
+    let nonce = opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}");
 
     debugging!("Decrypt key: {}", hex::encode(&key));
     debugging!("Decrypt nonce: {}", hex::encode(&nonce));
 
     let mut file_out = File::create(path_out)?;
-    let _ = decrypt_file(&mut file_in, &mut file_out, &key, &nonce, meta.compress)?;
 
+    let start = Instant::now();
+    let _ = decrypt_file(&mut file_in, &mut file_out, &key, &nonce, meta.compress)?;
+    let encrypt_duration = start.elapsed();
+    debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
+
+    util::zeroize(key);
+    util::zeroize(nonce);
+    drop(file_in);
+    drop(file_out);
+    if cmd_decrypt.remove_file {
+        match fs::remove_file(path) {
+            Err(e) => warning!("Remove file: {} failed: {}", path_display, e),
+            Ok(_) => information!("Remove file: {} succeed", path_display),
+        }
+    }
     Ok(())
 }
 
@@ -104,6 +119,7 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
             opt_result!(file_out.write_all(&decrypted), "Write file failed: {}");
         }
     }
+    util::zeroize(key);
     Ok(total_len)
 }
 
@@ -116,24 +132,20 @@ fn try_decrypt_key(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot: &Op
 }
 
 fn try_decrypt_key_ecdh(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot: &Option<String>) -> XResult<Vec<u8>> {
-    let is_slot_none = slot.as_ref().map(|s| s.is_empty()).unwrap_or(true);
-    if is_slot_none {
-        return simple_error!("--slot is required for ecdh");
-    }
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
     if wrap_key.header.enc.as_str() != ENC_AES256_GCM_P256 {
         return simple_error!("Unsupported header enc.");
     }
     let e_pub_key = &wrap_key.header.e_pub_key;
-    let e_pub_key_bytes = opt_result!(decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
+    let e_pub_key_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
     let (_, subject_public_key_info) = opt_result!( SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
 
-    let slot = slot.as_ref().unwrap();
+    let slot = read_slot(slot)?;
     let pin = read_pin(pin);
     let epk_bytes = subject_public_key_info.subject_public_key.as_ref();
 
     let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
-    let retired_slot_id = opt_result!(RetiredSlotId::from_str(slot), "Slot not found: {}");
+    let retired_slot_id = opt_result!(RetiredSlotId::from_str(&slot), "Slot not found: {}");
     let slot_id = SlotId::Retired(retired_slot_id);
     opt_result!(yk.verify_pin(pin.as_bytes()), "YubiKey verify pin failed: {}");
     let decrypted_shared_secret = opt_result!(decrypt_data(
@@ -141,9 +153,10 @@ fn try_decrypt_key_ecdh(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot
                 &epk_bytes,
                 AlgorithmId::EccP256,
                 slot_id,
-            ), "Decrypt piv failed: {}");
-    let key = simple_kdf(decrypted_shared_secret.as_slice());
+            ), "Decrypt via PIV card failed: {}");
+    let key = util::simple_kdf(decrypted_shared_secret.as_slice());
     let decrypted_key = aes_gcm_decrypt(&key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
+    util::zeroize(key);
     Ok(decrypted_key)
 }
 
@@ -167,10 +180,27 @@ fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XR
 
     let pgp_envelop = &envelop.encrypted_key;
     debugging!("PGP envelop: {}", &pgp_envelop);
-    let pgp_envelop_bytes = opt_result!(decode_base64(&pgp_envelop), "Decode PGP envelop failed: {}");
+    let pgp_envelop_bytes = opt_result!(util::decode_base64(&pgp_envelop), "Decode PGP envelop failed: {}");
 
     let key = trans.decipher(Cryptogram::RSA(&pgp_envelop_bytes))?;
     Ok(key)
+}
+
+fn read_slot(slot: &Option<String>) -> XResult<String> {
+    match slot {
+        Some(slot) => Ok(slot.to_string()),
+        None => {
+            print!("Input slot(eg 82, 83 ...): ");
+            io::stdout().flush().ok();
+            let mut buff = String::new();
+            let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");
+            if buff.trim().is_empty() {
+                simple_error!("Slot is required, and not inputted")
+            } else {
+                Ok(buff.trim().to_string())
+            }
+        }
+    }
 }
 
 fn read_pin(pin: &Option<String>) -> String {

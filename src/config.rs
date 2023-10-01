@@ -1,8 +1,9 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
-use rust_util::{opt_result, XResult};
-use rust_util::util_file::resolve_file_path;
 
+use rust_util::{debugging, opt_result, simple_error, XResult};
+use rust_util::util_file::resolve_file_path;
 use serde::{Deserialize, Serialize};
 
 use crate::spec::TinyEncryptEnvelopType;
@@ -15,7 +16,7 @@ use crate::spec::TinyEncryptEnvelopType;
 ///             "type": "pgp",
 ///             "kid": "KID-1",
 ///             "desc": "this is key 001",
-///             "public_key": "----- BEGIN OPENPGP ..."
+///             "publicPart": "----- BEGIN OPENPGP ..."
 ///         },
 ///         {
 ///             "type": "ecdh",
@@ -25,7 +26,7 @@ use crate::spec::TinyEncryptEnvelopType;
 ///         }
 ///     ],
 ///     "profiles": {
-///         "default": ["KID-1", "KID-2"],
+///         "default": ["KID-1", "KID-2", "type:pgp"],
 ///         "leve2": ["KID-2"]
 ///     }
 /// }
@@ -53,10 +54,14 @@ impl TinyEncryptConfig {
         Ok(opt_result!(serde_json::from_str(&config_contents), "Parse file: {}, failed: {}", file))
     }
 
-    pub fn find_envelops(&self, profile: &Option<String>) -> Vec<&TinyEncryptConfigEnvelop> {
+    pub fn find_envelops(&self, profile: &Option<String>) -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
         let profile = profile.as_ref().map(String::as_str).unwrap_or("default");
+        debugging!("Profile: {}", profile);
         let mut matched_envelops_map = HashMap::new();
         if let Some(key_ids) = self.profiles.get(profile) {
+            if key_ids.is_empty() {
+                return simple_error!("Profile: {} contains no valid envelopes", profile);
+            }
             for key_id in key_ids {
                 self.envelops.iter().for_each(|envelop| {
                     let is_matched = (&envelop.kid == key_id)
@@ -67,6 +72,17 @@ impl TinyEncryptConfig {
                 });
             }
         }
-        matched_envelops_map.values().map(|envelop| *envelop).collect()
+        let mut envelops: Vec<_> = matched_envelops_map.values().map(|envelop| *envelop).collect();
+        if envelops.is_empty() {
+            return simple_error!("Profile: {} has no valid envelopes found", profile);
+        }
+        envelops.sort_by(|e1, e2| {
+            if e1.r#type < e2.r#type { return Ordering::Less; }
+            if e1.r#type > e2.r#type { return Ordering::Greater; }
+            if e1.kid < e2.kid { return Ordering::Less; }
+            if e1.kid > e2.kid { return Ordering::Greater; }
+            Ordering::Equal
+        });
+        Ok(envelops)
     }
 }

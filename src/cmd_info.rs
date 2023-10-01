@@ -5,11 +5,10 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clap::Args;
-use rust_util::{iff, opt_result, success, XResult};
-use rust_util::util_time::get_current_millis;
+use rust_util::{iff, opt_result, success, util_time, XResult};
 use simpledateformat::format_human2;
 
-use crate::file;
+use crate::{file, util};
 
 #[derive(Debug, Args)]
 pub struct CmdInfo {
@@ -39,7 +38,7 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
                        header("File summary"), meta.version, meta.user_agent)
     );
 
-    let now_millis = get_current_millis() as u64;
+    let now_millis = util_time::get_current_millis() as u64;
     let fmt = simpledateformat::fmt("EEE MMM dd HH:mm:ss z yyyy").unwrap();
     infos.push(format!("{}: {}, {} ago",
                        header("Last modified"),
@@ -71,7 +70,7 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
     let encryption_algorithm = if let Some(encryption_algorithm) = &meta.encryption_algorithm {
         encryption_algorithm.to_string()
     } else {
-        "AES/GCM (default)".to_string()
+        format!("{} (default)", util::TINY_ENC_AES_GCM)
     };
     infos.push(format!("{}: {}", header("Encryption algorithm"), encryption_algorithm));
 

@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use rust_util::{opt_result, simple_error, XResult};
 
 use crate::spec::TinyEncryptMeta;
+use crate::util;
 
 pub fn _write_tiny_encrypt_meta<W: Write>(w: &mut W, meta: &TinyEncryptMeta) -> XResult<usize> {
     let meta_json = opt_result!( serde_json::to_string(meta), "Meta to JSON failed: {}");
@@ -26,7 +27,7 @@ pub fn read_tiny_encrypt_meta<R: Read>(r: &mut R) -> XResult<TinyEncryptMeta> {
     let mut tag_buff = [0_u8; 2];
     opt_result!(r.read_exact(&mut tag_buff), "Read tag failed: {}");
     let tag = u16::from_be_bytes(tag_buff);
-    if tag != 0x01 {
+    if tag != util::TINY_ENC_MAGIC_TAG {
         return simple_error!("Tag is not 0x01, but is: 0x{:x}", tag);
     }
 

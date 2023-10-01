@@ -1,13 +1,62 @@
-use std::io;
+use std::{fs, io};
 use std::io::Write;
+use std::path::Path;
 
 use base64::Engine;
 use base64::engine::general_purpose;
-use rust_util::{warning, XResult};
+use rand::random;
+use rust_util::{simple_error, warning, XResult};
+use zeroize::Zeroize;
 
 pub const ENC_AES256_GCM_P256: &str = "aes256-gcm-p256";
 pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
 pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
+
+pub const TINY_ENC_AES_GCM: &str = "AES/GCM";
+
+pub const TINY_ENC_MAGIC_TAG: u16 = 0x01;
+
+pub fn require_tiny_enc_file_and_exists(path: impl AsRef<Path>) -> XResult<()> {
+    let path = path.as_ref();
+    let path_display = format!("{}", path.display());
+    if !path_display.ends_with(TINY_ENC_FILE_EXT) {
+        return simple_error!("File is not tiny encrypt file: {}", &path_display);
+    }
+    require_file_exists(path)?;
+    Ok(())
+}
+
+pub fn require_none_tiny_enc_file_and_exists(path: impl AsRef<Path>) -> XResult<()> {
+    let path = path.as_ref();
+    let path_display = format!("{}", path.display());
+    if path_display.ends_with(TINY_ENC_FILE_EXT) {
+        return simple_error!("File is already tiny encrypt file: {}", &path_display);
+    }
+    require_file_exists(path)?;
+    Ok(())
+}
+
+pub fn require_file_exists(path: impl AsRef<Path>) -> XResult<()> {
+    let path = path.as_ref();
+    match fs::metadata(path) {
+        Ok(_) => Ok(()),
+        Err(_) => simple_error!("File: {} not exists", path.display()),
+    }
+}
+
+pub fn require_file_not_exists(path: impl AsRef<Path>) -> XResult<()> {
+    let path = path.as_ref();
+    match fs::metadata(path) {
+        Ok(_) => simple_error!("File: {} exists", path.display()),
+        Err(_) => Ok(()),
+    }
+}
+
+pub fn make_key256_and_nonce() -> (Vec<u8>, Vec<u8>) {
+    let key: [u8; 32] = random();
+    let nonce: [u8; 12] = random();
+    (key.into(), nonce.into())
+}
 
 pub fn simple_kdf(input: &[u8]) -> Vec<u8> {
     let input = hex::decode(sha256::digest(input)).unwrap();
@@ -27,6 +76,10 @@ pub fn decode_base64(input: &str) -> XResult<Vec<u8>> {
 
 pub fn encode_base64(input: &[u8]) -> String {
     general_purpose::STANDARD.encode(input)
+}
+
+pub fn encode_base64_url_no_pad(input: &[u8]) -> String {
+    general_purpose::URL_SAFE_NO_PAD.encode(input)
 }
 
 pub fn decode_base64_url_no_pad(input: &str) -> XResult<Vec<u8>> {
@@ -75,4 +128,9 @@ pub fn get_user_agent() -> String {
                 panic!("Unsupported OS!");
             }
     )
+}
+
+pub fn zeroize(object: impl Zeroize) {
+    let mut object = object;
+    object.zeroize();
 }

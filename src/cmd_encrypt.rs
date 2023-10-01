@@ -1,40 +1,62 @@
 use std::fs;
+use std::fs::File;
+use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::time::Instant;
 
 use clap::Args;
-use p256::{PublicKey, EncodedPoint};
-use p256::ecdh::EphemeralSecret;
-use p256::elliptic_curve::sec1::{FromEncodedPoint, ToEncodedPoint};
-use rand::random;
-use rand::rngs::OsRng;
+use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, opt_result, simple_error, success, XResult};
+use rust_util::{debugging, failure, information, opt_result, simple_error, success, warning, XResult};
 
+use crate::{util, util_ecdh};
+use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
+use crate::crypto_aes::aes_gcm_encrypt;
 use crate::crypto_rsa::parse_spki;
-use crate::spec::{EncMetadata, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{encode_base64, TINY_ENC_CONFIG_FILE};
+use crate::spec::{EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
+use crate::util::{ENC_AES256_GCM_P256, TINY_ENC_CONFIG_FILE};
+use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
 pub struct CmdEncrypt {
     /// Files need to be decrypted
     pub paths: Vec<PathBuf>,
-    // Comment
+    /// Comment
+    #[arg(long, short = 'c')]
     pub comment: Option<String>,
-    // Comment
+    /// Encrypted comment
+    #[arg(long, short = 'C')]
     pub encrypted_comment: Option<String>,
-    // Encryption profile
+    /// Encryption profile
+    #[arg(long, short = 'p')]
     pub profile: Option<String>,
+    /// Compress before encrypt
+    #[arg(long, short = 'x')]
+    pub compress: bool,
+    /// Compress level (from 0[none], 1[fast] .. 6[default] .. to 9[best])
+    #[arg(long, short = 'L')]
+    pub compress_level: Option<u32>,
+    /// Compatible with 1.0
+    #[arg(long, short = '1')]
+    pub compatible_with_1_0: bool,
+    /// Remove source file
+    #[arg(long, short = 'R')]
+    pub remove_file: bool,
 }
 
 pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE)?;
-    let envelops = config.find_envelops(&cmd_encrypt.profile);
+    debugging!("Found tiny encrypt config: {:?}", config);
+    let envelops = config.find_envelops(&cmd_encrypt.profile)?;
     if envelops.is_empty() { return simple_error!("Cannot find any valid envelops"); }
+    debugging!("Found envelops: {:?}", envelops);
+    let envelop_tkids: Vec<_> = envelops.iter().map(|e| format!("{}:{}", e.r#type.get_name(), e.kid)).collect();
+    information!("Matched {} envelop(s): \n- {}", envelops.len(), envelop_tkids.join("\n- "));
 
     debugging!("Cmd encrypt: {:?}", cmd_encrypt);
     for path in &cmd_encrypt.paths {
-        match encrypt_single(path, &envelops) {
+        match encrypt_single(path, &envelops, &cmd_encrypt) {
             Ok(_) => success!("Encrypt {} succeed", path.to_str().unwrap_or("N/A")),
             Err(e) => failure!("Encrypt {} failed: {}", path.to_str().unwrap_or("N/A"), e),
         }
@@ -42,22 +64,127 @@ pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
     Ok(())
 }
 
-fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop]) -> XResult<()> {
-    let (key, nonce) = make_key256_and_nonce();
+fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<()> {
+    let path_display = format!("{}", path.display());
+    util::require_none_tiny_enc_file_and_exists(path)?;
+
+    let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
+
+    let path_out = format!("{}{}", path_display, util::TINY_ENC_FILE_EXT);
+    util::require_file_not_exists(path_out.as_str())?;
+
+    let (key, nonce) = util::make_key256_and_nonce();
     let envelops = encrypt_envelops(&key, &envelops)?;
+
+    let encrypted_comment = match &cmd_encrypt.encrypted_comment {
+        None => None,
+        Some(encrypted_comment) => Some(util::encode_base64(
+            &aes_gcm_encrypt(&key, &nonce, encrypted_comment.as_bytes())?))
+    };
 
     let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
     let enc_metadata = EncMetadata {
-        comment: None,
-        encrypted_comment: None,
+        comment: cmd_encrypt.comment.clone(),
+        encrypted_comment,
         encrypted_meta: None,
-        compress: false,
+        compress: cmd_encrypt.compress,
     };
 
-    let _encrypt_meta = TinyEncryptMeta::new(&file_metadata, &enc_metadata, &nonce, envelops);
+    let mut encrypt_meta = TinyEncryptMeta::new(&file_metadata, &enc_metadata, &nonce, envelops);
+    debugging!("Encrypted meta: {:?}", encrypt_meta);
 
-    // TODO write to file and do encrypt
+    if cmd_encrypt.compatible_with_1_0 {
+        if let Some(envelops) = encrypt_meta.envelops {
+            let mut filter_envelops = vec![];
+            for envelop in envelops {
+                if (envelop.r#type == TinyEncryptEnvelopType::Pgp) && encrypt_meta.pgp_envelop.is_none() {
+                    encrypt_meta.pgp_fingerprint = Some(format!("KID:{}", envelop.kid));
+                    encrypt_meta.pgp_envelop = Some(envelop.encrypted_key.clone());
+                } else if (envelop.r#type == TinyEncryptEnvelopType::Ecdh) && encrypt_meta.ecdh_envelop.is_none() {
+                    encrypt_meta.ecdh_point = Some(format!("KID:{}", envelop.kid));
+                    encrypt_meta.ecdh_envelop = Some(envelop.encrypted_key.clone());
+                } else {
+                    filter_envelops.push(envelop);
+                }
+            }
+            encrypt_meta.envelops = if filter_envelops.is_empty() { None } else { Some(filter_envelops) };
+            if encrypt_meta.envelops.is_none() {
+                encrypt_meta.version = TINY_ENCRYPT_VERSION_10.to_string();
+            }
+        }
+    }
+
+    let mut file_out = File::create(&path_out)?;
+    opt_result!(file_out.write_all(&util::TINY_ENC_MAGIC_TAG.to_be_bytes()), "Write tag failed: {}");
+    let encrypted_meta_bytes = opt_result!(serde_json::to_vec(&encrypt_meta), "Generate meta json bytes failed: {}");
+    let encrypted_meta_bytes_len = encrypted_meta_bytes.len() as u32;
+    opt_result!(file_out.write_all(&encrypted_meta_bytes_len.to_be_bytes()), "Write meta len failed: {}");
+    opt_result!(file_out.write_all(&encrypted_meta_bytes), "Write meta failed: {}");
+
+    let start = Instant::now();
+    encrypt_file(&mut file_in, &mut file_out, &key, &nonce, cmd_encrypt.compress, &cmd_encrypt.compress_level)?;
+    let encrypt_duration = start.elapsed();
+    debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
+
+    util::zeroize(key);
+    util::zeroize(nonce);
+    drop(file_in);
+    drop(file_out);
+    if cmd_encrypt.remove_file {
+        match fs::remove_file(path) {
+            Err(e) => warning!("Remove file: {} failed: {}", path_display, e),
+            Ok(_) => information!("Remove file: {} succeed", path_display),
+        }
+    }
     Ok(())
+}
+
+
+fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<usize> {
+    let mut total_len = 0;
+    let mut buffer = [0u8; 1024 * 8];
+    let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
+    let mut gz_encoder = match compress_level {
+        None => GzStreamEncoder::new_default(),
+        Some(compress_level) => {
+            if *compress_level > 9 {
+                return simple_error!("Compress level must in range [0, 9]");
+            }
+            GzStreamEncoder::new(Compression::new(*compress_level))
+        }
+    };
+    let mut encryptor = aes_gcm_stream::Aes256GcmStreamEncryptor::new(key, &nonce);
+    loop {
+        let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
+        if len == 0 {
+            let last_block = if compress {
+                let last_compressed_buffer = opt_result!(gz_encoder.finalize(), "Decompress file failed: {}");
+                let mut encrypted_block = encryptor.update(&last_compressed_buffer);
+                let (last_block, tag) = encryptor.finalize();
+                encrypted_block.extend_from_slice(&last_block);
+                encrypted_block.extend_from_slice(&tag);
+                encrypted_block
+            } else {
+                let (mut last_block, tag) = encryptor.finalize();
+                last_block.extend_from_slice(&tag);
+                last_block
+            };
+            opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
+            success!("Decrypt finished, total bytes: {}", total_len);
+            break;
+        } else {
+            total_len += len;
+            let encrypted = if compress {
+                let compressed = opt_result!(gz_encoder.update(&buffer[0..len]), "Decompress file failed: {}");
+                encryptor.update(&compressed)
+            } else {
+                encryptor.update(&buffer[0..len])
+            };
+            opt_result!(file_out.write_all(&encrypted), "Write file failed: {}");
+        }
+    }
+    util::zeroize(key);
+    Ok(total_len)
 }
 
 fn encrypt_envelops(key: &[u8], envelops: &[&TinyEncryptConfigEnvelop]) -> XResult<Vec<TinyEncryptEnvelop>> {
@@ -78,47 +205,30 @@ fn encrypt_envelops(key: &[u8], envelops: &[&TinyEncryptConfigEnvelop]) -> XResu
 
 fn encrypt_envelop_ecdh(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let public_key_point_hex = &envelop.public_part;
-    let public_key_point_bytes = opt_result!(hex::decode(public_key_point_hex), "Parse public key point hex failed: {}");
-    let encoded_point = opt_result!(EncodedPoint::from_bytes(&public_key_point_bytes), "Parse public key point failed: {}");
-    let public_key = PublicKey::from_encoded_point(&encoded_point).unwrap();
+    let (shared_secret, ephemeral_spki) = util_ecdh::compute_shared_secret(public_key_point_hex)?;
+    let shared_key = util::simple_kdf(shared_secret.as_slice());
+    let (_, nonce) = util::make_key256_and_nonce();
 
-    let esk = EphemeralSecret::random(&mut OsRng);
-    let epk = esk.public_key();
-    let epk_bytes = EphemeralKeyBytes::from_public_key(&epk);
-    let public_key_encoded_point = public_key.to_encoded_point(false);
-    let shared_secret = esk.diffie_hellman(&public_key);
+    let encrypted_key = aes_gcm_encrypt(&shared_key, &nonce, key)?;
 
-    // PORT Java Implementation
-    //    public static WrapKey encryptEcdhP256(String kid, PublicKey publicKey, byte[] data) {
-    //         AssertUtil.isTrue(publicKey instanceof ECPublicKey, "Public key must be EC public key");
-    //         if (data == null || data.length == 0) {
-    //             return null;
-    //         }
-    //         final Tuple2<PublicKey, byte[]> ecdh = ECUtil.ecdh(ECUtil.CURVE_SECP256R1, publicKey);
-    //         final byte[] ePublicKeyBytes = ecdh.getVal1().getEncoded();
-    //         final byte[] key = KdfUtil.simpleKdf256(ecdh.getVal2());
-    //
-    //         final byte[] nonce = RandomTool.secureRandom().nextbytes(AESCryptTool.GCM_NONCE_LENGTH);
-    //         final byte[] encryptedData = AESCryptTool.gcmEncrypt(key, nonce).from(Bytes.from(data)).toBytes().bytes();
-    //         final WrapKey wrapKey = new WrapKey();
-    //         final WrapKeyHeader wrapKeyHeader = new WrapKeyHeader();
-    //         wrapKeyHeader.setKid(kid);
-    //         wrapKeyHeader.setEnc(ENC_AES256_GCM_P256);
-    //         wrapKeyHeader.setePubKey(Base64s.uriCompatible().encode(ePublicKeyBytes));
-    //         wrapKey.setHeader(wrapKeyHeader);
-    //         wrapKey.setNonce(nonce);
-    //         wrapKey.setEncrytpedData(encryptedData);
-    //         return wrapKey;
-    //     }
+    let wrap_key = WrapKey {
+        header: WrapKeyHeader {
+            kid: Some(envelop.kid.clone()),
+            enc: ENC_AES256_GCM_P256.to_string(),
+            e_pub_key: util::encode_base64_url_no_pad(&ephemeral_spki),
+        },
+        nonce,
+        encrypted_data: encrypted_key,
+    };
+    let encoded_wrap_key = wrap_key.encode()?;
 
     Ok(TinyEncryptEnvelop {
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),
         desc: envelop.desc.clone(),
-        encrypted_key: "".to_string(), // TODO ...
+        encrypted_key: encoded_wrap_key,
     })
 }
-
 
 fn encrypt_envelop_pgp(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let pgp_public_key = opt_result!(parse_spki(&envelop.public_part), "Parse PGP public key failed: {}");
@@ -128,27 +238,6 @@ fn encrypt_envelop_pgp(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResul
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),
         desc: envelop.desc.clone(),
-        encrypted_key: encode_base64(&encrypted_key),
+        encrypted_key: util::encode_base64(&encrypted_key),
     })
-}
-
-fn make_key256_and_nonce() -> (Vec<u8>, Vec<u8>) {
-    let key: [u8; 32] = random();
-    let nonce: [u8; 12] = random();
-    (key.into(), nonce.into())
-}
-
-#[derive(Debug)]
-pub struct EphemeralKeyBytes(EncodedPoint);
-
-impl EphemeralKeyBytes {
-    fn from_public_key(epk: &PublicKey) -> Self {
-        EphemeralKeyBytes(epk.to_encoded_point(true))
-    }
-
-    fn decompress(&self) -> EncodedPoint {
-        // EphemeralKeyBytes is a valid compressed encoding by construction.
-        let p = PublicKey::from_encoded_point(&self.0).unwrap();
-        p.to_encoded_point(false)
-    }
 }

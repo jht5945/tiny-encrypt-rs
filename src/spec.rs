@@ -4,9 +4,9 @@ use rust_util::util_time;
 use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
 
-use crate::util::{encode_base64, get_user_agent};
+use crate::util::{encode_base64, get_user_agent, TINY_ENC_AES_GCM};
 
-// pub const TINY_ENCRYPT_VERSION_10: &'static str = "1.0";
+pub const TINY_ENCRYPT_VERSION_10: &'static str = "1.0";
 pub const TINY_ENCRYPT_VERSION_11: &'static str = "1.1";
 
 /// Specification: [Tiny Encrypt Spec V1.1](https://git.hatter.ink/hatter/tiny-encrypt-java/src/branch/master/TinyEncryptSpecV1.1.md)
@@ -46,7 +46,7 @@ pub struct TinyEncryptEnvelop {
 }
 
 /// NOTICE: Kms and Age is not being supported in the future
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub enum TinyEncryptEnvelopType {
     #[serde(rename = "pgp")]
     Pgp,
@@ -96,7 +96,7 @@ impl TinyEncryptMeta {
             ecdh_point: None,
             envelop: None,
             envelops: Some(envelops),
-            encryption_algorithm: None,
+            encryption_algorithm: Some(TINY_ENC_AES_GCM.to_string()),
             nonce: encode_base64(nonce),
             file_length: metadata.len(),
             file_last_modified: match metadata.modified() {

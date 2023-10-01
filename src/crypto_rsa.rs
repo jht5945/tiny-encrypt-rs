@@ -1,7 +1,4 @@
-use rsa::{BigUint, Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
-use rsa::pkcs1::der::Decode;
-use rsa::pkcs8::PrivateKeyInfo;
-use rsa::traits::PublicKeyParts;
+use rsa::{BigUint, RsaPublicKey};
 use rust_util::{opt_result, XResult};
 use x509_parser::prelude::FromDer;
 use x509_parser::public_key::RSAPublicKey;
@@ -43,6 +40,7 @@ fn pem_to_der_bytes(pem: &str) -> XResult<Vec<u8>> {
 
 #[test]
 fn test_parse_spki() {
+    use rsa::traits::PublicKeyParts;
     let public_key_pem = "-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgK\
     CAgEApUM8M+QRMUw0dIvXISFx\n43j4h9CK38Y9HD6kPcc3Z0dCGPiFy7Ze0OQebPWHyUZ2YmqsdyzFuOQuV9P2pxxj\n/W\
     LIgRqZV8Jk8tWhtAjOOvm0MTc2rg+EJHfa+zhX4eFEMsj4DvQBMJDXiKnpXTM/\nj7oMKpIUQHqfXBwsEJHLmHZTLeEBEYK\
@@ -71,6 +69,9 @@ fn test_parse_spki() {
 
 #[test]
 fn test_parse_spki_and_test() {
+    use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
+    use rsa::pkcs1::der::Decode;
+    use rsa::pkcs8::PrivateKeyInfo;
     let private_key_pem = "-----BEGIN PRIVATE KEY-----
 MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCsuTaS34xvrgr5
 ZXEuE8lYDYuLxATq1ds6/8YlNOeKReCGwRkObfKl0uyj79WLka2RCZELDiHyQcDG

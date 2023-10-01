@@ -1,13 +1,14 @@
 extern crate core;
 
 use clap::{Parser, Subcommand};
-use rust_util::XResult;
+use rust_util::{debugging, XResult};
 
 use crate::cmd_decrypt::CmdDecrypt;
 use crate::cmd_encrypt::CmdEncrypt;
 use crate::cmd_info::CmdInfo;
 
 mod util;
+mod util_ecdh;
 mod compress;
 mod config;
 mod spec;
@@ -45,12 +46,15 @@ fn main() -> XResult<()> {
     let args = Cli::parse();
     match args.command {
         Commands::Encrypt(cmd_encrypt) => {
+            debugging!("Encrypt: {:?}", cmd_encrypt);
             cmd_encrypt::encrypt(cmd_encrypt)
         }
         Commands::Decrypt(cmd_decrypt) => {
+            debugging!("Decrypt: {:?}", cmd_decrypt);
             cmd_decrypt::decrypt(cmd_decrypt)
         }
         Commands::Info(cmd_info) => {
+            debugging!("Info: {:?}", cmd_info);
             cmd_info::info(cmd_info)
         }
     }
