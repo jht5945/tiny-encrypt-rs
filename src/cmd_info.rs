@@ -22,7 +22,9 @@ pub struct CmdInfo {
 pub fn info(cmd_info: CmdInfo) -> XResult<()> {
     let path_display = format!("{}", cmd_info.path.display());
     let mut file_in = opt_result!(File::open(&cmd_info.path), "Open file: {} failed: {}", &path_display);
-    let meta = opt_result!(file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
+    let meta = opt_result!(
+        file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display
+    );
 
     if cmd_info.raw_meta {
         success!("Meta data:\n{}", serde_json::to_string_pretty(&meta).expect("SHOULD NOT HAPPEN"));
@@ -51,14 +53,18 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
                        format_human2(Duration::from_millis(now_millis - meta.created))
     ));
 
-    meta.envelops.as_ref().map(|envelops| envelops.iter().enumerate().for_each(|(i, envelop)| {
-        infos.push(format!("{}: {}{}{}",
-                           header(&format!("Envelop #{}", i + 1)),
-                           envelop.r#type.get_upper_name(),
-                           iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid)),
-                           iff!(envelop.desc.is_none(), "".into(), format!(", Desc: {}", envelop.desc.as_ref().unwrap()))
-        ));
-    }));
+    meta.envelops.as_ref().map(|envelops|
+        envelops.iter().enumerate().for_each(|(i, envelop)| {
+            let kid = iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid));
+            let desc = iff!(envelop.desc.is_none(), "".into(), format!(", Desc: {}", envelop.desc.as_ref().unwrap()));
+            infos.push(format!("{}: {}{}{}",
+                               header(&format!("Envelop #{}", i + 1)),
+                               envelop.r#type.get_upper_name(),
+                               kid,
+                               desc
+            ));
+        })
+    );
     meta.pgp_fingerprint.map(|fingerprint| {
         infos.push(format!("{}: {}", header("PGP fingerprint"), fingerprint));
     });

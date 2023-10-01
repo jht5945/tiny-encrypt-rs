@@ -7,7 +7,8 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, information, opt_result, simple_error, success, warning, XResult};
+use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_msg, warning, XResult};
+use zeroize::Zeroize;
 
 use crate::{util, util_ecdh};
 use crate::compress::GzStreamEncoder;
@@ -51,22 +52,57 @@ pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
     let envelops = config.find_envelops(&cmd_encrypt.profile)?;
     if envelops.is_empty() { return simple_error!("Cannot find any valid envelops"); }
     debugging!("Found envelops: {:?}", envelops);
-    let envelop_tkids: Vec<_> = envelops.iter().map(|e| format!("{}:{}", e.r#type.get_name(), e.kid)).collect();
+    let envelop_tkids: Vec<_> = envelops.iter()
+        .map(|e| format!("{}:{}", e.r#type.get_name(), e.kid))
+        .collect();
     information!("Matched {} envelop(s): \n- {}", envelops.len(), envelop_tkids.join("\n- "));
 
     debugging!("Cmd encrypt: {:?}", cmd_encrypt);
+    let start = Instant::now();
+    let mut succeed_count = 0;
+    let mut skipped_count = 0;
+    let mut failed_count = 0;
+    let mut total_len = 0_u64;
     for path in &cmd_encrypt.paths {
+        let start_encrypt_single = Instant::now();
         match encrypt_single(path, &envelops, &cmd_encrypt) {
-            Ok(_) => success!("Encrypt {} succeed", path.to_str().unwrap_or("N/A")),
-            Err(e) => failure!("Encrypt {} failed: {}", path.to_str().unwrap_or("N/A"), e),
+            Ok(len) => {
+                total_len += len;
+                if len > 0 { succeed_count += 1; } else { skipped_count += 1; }
+                success!(
+                    "Encrypt {} succeed, cost {} ms, file size {} byte(s)",
+                    path.to_str().unwrap_or("N/A"),
+                    start_encrypt_single.elapsed().as_millis(),
+                    len
+                );
+            }
+            Err(e) => {
+                failed_count += 1;
+                failure!("Encrypt {} failed: {}", path.to_str().unwrap_or("N/A"), e);
+            }
         }
+    }
+    if (succeed_count + failed_count) > 1 {
+        success!(
+            "Encrypt succeed {} file(s) {} byte(s), failed {} file(s), skipped {} file(s), total cost {} ms",
+            succeed_count,
+            total_len,
+            failed_count,
+            skipped_count,
+            start.elapsed().as_millis(),
+        );
     }
     Ok(())
 }
 
-fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<()> {
+fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
-    util::require_none_tiny_enc_file_and_exists(path)?;
+    if path_display.ends_with(util::TINY_ENC_FILE_EXT) {
+        information!("Tiny enc file skipped: {}", path_display);
+        return Ok(0);
+    }
+
+    util::require_file_exists(path)?;
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
 
@@ -122,7 +158,9 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     opt_result!(file_out.write_all(&encrypted_meta_bytes), "Write meta failed: {}");
 
     let start = Instant::now();
+    util_msg::print_lastline(&format!("Encrypting file: {} ...", path_display));
     encrypt_file(&mut file_in, &mut file_out, &key, &nonce, cmd_encrypt.compress, &cmd_encrypt.compress_level)?;
+    util_msg::clear_lastline();
     let encrypt_duration = start.elapsed();
     debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
 
@@ -136,7 +174,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
             Ok(_) => information!("Remove file: {} succeed", path_display),
         }
     }
-    Ok(())
+    Ok(file_metadata.len())
 }
 
 
@@ -170,7 +208,7 @@ fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
                 last_block
             };
             opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
-            success!("Decrypt finished, total bytes: {}", total_len);
+            debugging!("Encrypt finished, total bytes: {}", total_len);
             break;
         } else {
             total_len += len;
@@ -183,7 +221,8 @@ fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
             opt_result!(file_out.write_all(&encrypted), "Write file failed: {}");
         }
     }
-    util::zeroize(key);
+    let mut key = key;
+    key.zeroize();
     Ok(total_len)
 }
 

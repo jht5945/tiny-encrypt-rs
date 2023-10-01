@@ -49,8 +49,10 @@ pub struct TinyEncryptConfigEnvelop {
 impl TinyEncryptConfig {
     pub fn load(file: &str) -> XResult<Self> {
         let resolved_file = resolve_file_path(file);
-        let config_contents = opt_result!(fs::read_to_string(&resolved_file), "Read file: {}, failed: {}", file);
-        // TODO replace with Human JSON
+        let config_contents = opt_result!(
+            fs::read_to_string(&resolved_file), "Read file: {}, failed: {}", file
+        );
+        // TODO Replace with Human JSON
         Ok(opt_result!(serde_json::from_str(&config_contents), "Parse file: {}, failed: {}", file))
     }
 
@@ -72,15 +74,17 @@ impl TinyEncryptConfig {
                 });
             }
         }
-        let mut envelops: Vec<_> = matched_envelops_map.values().map(|envelop| *envelop).collect();
+        let mut envelops: Vec<_> = matched_envelops_map.values()
+            .map(|envelop| *envelop)
+            .collect();
         if envelops.is_empty() {
             return simple_error!("Profile: {} has no valid envelopes found", profile);
         }
         envelops.sort_by(|e1, e2| {
-            if e1.r#type < e2.r#type { return Ordering::Less; }
-            if e1.r#type > e2.r#type { return Ordering::Greater; }
-            if e1.kid < e2.kid { return Ordering::Less; }
-            if e1.kid > e2.kid { return Ordering::Greater; }
+            if e1.r#type < e2.r#type { return Ordering::Greater; }
+            if e1.r#type > e2.r#type { return Ordering::Less; }
+            if e1.kid < e2.kid { return Ordering::Greater; }
+            if e1.kid > e2.kid { return Ordering::Less; }
             Ordering::Equal
         });
         Ok(envelops)

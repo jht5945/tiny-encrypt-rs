@@ -8,14 +8,14 @@ use std::time::Instant;
 use clap::Args;
 use openpgp_card::crypto_data::Cryptogram;
 use openpgp_card::OpenPgp;
-use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_term, warning, XResult};
+use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_msg, util_term, warning, XResult};
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
 use yubikey::piv::{AlgorithmId, decrypt_data, RetiredSlotId, SlotId};
 use yubikey::YubiKey;
+use zeroize::Zeroize;
 
-use crate::{file, util};
-use crate::card::get_card;
+use crate::{card, file, util};
 use crate::compress::GzStreamDecoder;
 use crate::crypto_aes::aes_gcm_decrypt;
 use crate::spec::{TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
@@ -39,16 +39,42 @@ pub struct CmdDecrypt {
 
 pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     debugging!("Cmd decrypt: {:?}", cmd_decrypt);
+    let start = Instant::now();
+    let mut succeed_count = 0;
+    let mut failed_count = 0;
+    let mut total_len = 0_u64;
     for path in &cmd_decrypt.paths {
+        let start_decrypt_single = Instant::now();
         match decrypt_single(path, &cmd_decrypt.pin, &cmd_decrypt.slot, &cmd_decrypt) {
-            Ok(_) => success!("Decrypt {} succeed", path.to_str().unwrap_or("N/A")),
-            Err(e) => failure!("Decrypt {} failed: {}", path.to_str().unwrap_or("N/A"), e),
+            Ok(len) => {
+                succeed_count += 1;
+                total_len += len;
+                success!(
+                    "Decrypt {} succeed, cost {} ms, file size {} byte(s)",
+                    path.to_str().unwrap_or("N/A"),
+                    start_decrypt_single.elapsed().as_millis(),
+                    len
+                );
+            }
+            Err(e) => {
+                failed_count += 1;
+                failure!("Decrypt {} failed: {}", path.to_str().unwrap_or("N/A"), e);
+            }
         }
+    }
+    if (succeed_count + failed_count) > 1 {
+        success!(
+            "Decrypt succeed {} file(s) {} byte(s), failed {} file(s), total cost {} ms",
+            succeed_count,
+            total_len,
+            failed_count,
+            start.elapsed().as_millis(),
+        );
     }
     Ok(())
 }
 
-pub fn decrypt_single(path: &PathBuf, pin: &Option<String>, slot: &Option<String>, cmd_decrypt: &CmdDecrypt) -> XResult<()> {
+pub fn decrypt_single(path: &PathBuf, pin: &Option<String>, slot: &Option<String>, cmd_decrypt: &CmdDecrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
     util::require_tiny_enc_file_and_exists(path)?;
 
@@ -70,7 +96,11 @@ pub fn decrypt_single(path: &PathBuf, pin: &Option<String>, slot: &Option<String
     let mut file_out = File::create(path_out)?;
 
     let start = Instant::now();
+    util_msg::print_lastline(
+        &format!("Decrypting file: {}{} ...", path_display, iff!(meta.compress, " [compressed]", ""))
+    );
     let _ = decrypt_file(&mut file_in, &mut file_out, &key, &nonce, meta.compress)?;
+    util_msg::clear_lastline();
     let encrypt_duration = start.elapsed();
     debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
 
@@ -84,7 +114,7 @@ pub fn decrypt_single(path: &PathBuf, pin: &Option<String>, slot: &Option<String
             Ok(_) => information!("Remove file: {} succeed", path_display),
         }
     }
-    Ok(())
+    Ok(meta.file_length)
 }
 
 fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool) -> XResult<usize> {
@@ -106,7 +136,7 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
                 last_block
             };
             opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
-            success!("Decrypt finished, total bytes: {}", total_len);
+            debugging!("Decrypt finished, total bytes: {}", total_len);
             break;
         } else {
             total_len += len;
@@ -119,7 +149,8 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
             opt_result!(file_out.write_all(&decrypted), "Write file failed: {}");
         }
     }
-    util::zeroize(key);
+    let mut key = key;
+    key.zeroize();
     Ok(total_len)
 }
 
@@ -127,7 +158,9 @@ fn try_decrypt_key(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot: &Op
     match envelop.r#type {
         TinyEncryptEnvelopType::Pgp => try_decrypt_key_pgp(envelop, pin),
         TinyEncryptEnvelopType::Ecdh => try_decrypt_key_ecdh(envelop, pin, slot),
-        unknown_type => return simple_error!("Unknown or not supported type: {}", unknown_type.get_name())
+        unknown_type => {
+            return simple_error!("Unknown or not supported type: {}", unknown_type.get_name());
+        }
     }
 }
 
@@ -138,7 +171,7 @@ fn try_decrypt_key_ecdh(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot
     }
     let e_pub_key = &wrap_key.header.e_pub_key;
     let e_pub_key_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
-    let (_, subject_public_key_info) = opt_result!( SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
+    let (_, subject_public_key_info) = opt_result!(SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
 
     let slot = read_slot(slot)?;
     let pin = read_pin(pin);
@@ -161,7 +194,7 @@ fn try_decrypt_key_ecdh(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot
 }
 
 fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
-    let card = match get_card() {
+    let card = match card::get_card() {
         Err(e) => {
             failure!("Get PGP card failed: {}", e);
             return simple_error!("Get card failed: {}", e);

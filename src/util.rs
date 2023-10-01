@@ -26,16 +26,6 @@ pub fn require_tiny_enc_file_and_exists(path: impl AsRef<Path>) -> XResult<()> {
     Ok(())
 }
 
-pub fn require_none_tiny_enc_file_and_exists(path: impl AsRef<Path>) -> XResult<()> {
-    let path = path.as_ref();
-    let path_display = format!("{}", path.display());
-    if path_display.ends_with(TINY_ENC_FILE_EXT) {
-        return simple_error!("File is already tiny encrypt file: {}", &path_display);
-    }
-    require_file_exists(path)?;
-    Ok(())
-}
-
 pub fn require_file_exists(path: impl AsRef<Path>) -> XResult<()> {
     let path = path.as_ref();
     match fs::metadata(path) {
@@ -55,7 +45,11 @@ pub fn require_file_not_exists(path: impl AsRef<Path>) -> XResult<()> {
 pub fn make_key256_and_nonce() -> (Vec<u8>, Vec<u8>) {
     let key: [u8; 32] = random();
     let nonce: [u8; 12] = random();
-    (key.into(), nonce.into())
+    let result = (key.into(), nonce.into());
+    let (mut key, mut nonce) = (key, nonce);
+    key.zeroize();
+    nonce.zeroize();
+    result
 }
 
 pub fn simple_kdf(input: &[u8]) -> Vec<u8> {

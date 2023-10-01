@@ -1,6 +1,7 @@
 # tiny-encrypt-rs
 
-**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or CanoKey(https://www.canokeys.org/) is required.
+**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or CanoKey(https://www.canokeys.org/) is
+required, the Key NEED supports PIV or OpenPGP.
 
 Tiny encrypt for Rust
 
