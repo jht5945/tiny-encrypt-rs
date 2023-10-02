@@ -21,7 +21,7 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
       "type": "pgp",
       "kid": "KID-1",
       "desc": "this is key 001",
-      "publicPart": "----- BEGIN OPENPGP ..."
+      "publicPart": "----- BEGIN PUBLIC KEY ..."
     },
     {
       "type": "ecdh",
