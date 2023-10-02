@@ -3,6 +3,8 @@
 **IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or CanoKey(https://www.canokeys.org/) is
 required, the Key NEED supports PIV or OpenPGP.
 
+![](https://cdn.hatter.ink/doc/7684_4DB4452911E2A25AB993429AA7FFCD65/yubikey-5-family.png)
+
 Tiny encrypt for Rust
 
 > Tiny encrypt rs is a Rust implementation of Tiny encrypt java https://git.hatter.ink/hatter/tiny-encrypt-java <br>
