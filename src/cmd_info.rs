@@ -5,23 +5,38 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clap::Args;
-use rust_util::{iff, opt_result, success, util_time, XResult};
+use rust_util::{iff, opt_result, simple_error, success, util_time, warning, XResult};
 use simpledateformat::format_human2;
 
 use crate::{file, util};
+use crate::util::TINY_ENC_FILE_EXT;
 
 #[derive(Debug, Args)]
 pub struct CmdInfo {
     /// File
-    pub path: PathBuf,
+    pub paths: Vec<PathBuf>,
     /// Show raw meta
     #[arg(long, default_value_t = false)]
     pub raw_meta: bool,
 }
 
 pub fn info(cmd_info: CmdInfo) -> XResult<()> {
-    let path_display = format!("{}", cmd_info.path.display());
-    let mut file_in = opt_result!(File::open(&cmd_info.path), "Open file: {} failed: {}", &path_display);
+    for (i, path) in cmd_info.paths.iter().enumerate() {
+        if i > 0 { println!("{}", "-".repeat(88)); }
+        if let Err(e) = info_single(path, &cmd_info) {
+            warning!("Parse Tiny Encrypt file info failed: {}", e);
+        }
+    }
+    Ok(())
+}
+
+pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
+    let path_display = format!("{}", path.display());
+    if !path_display.ends_with(TINY_ENC_FILE_EXT) {
+        return simple_error!("Not a Tiny Encrypt file: {}", path_display);
+    }
+
+    let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
     let meta = opt_result!(
         file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display
     );
@@ -56,7 +71,7 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
     meta.envelops.as_ref().map(|envelops|
         envelops.iter().enumerate().for_each(|(i, envelop)| {
             let kid = iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid));
-            let desc = iff!(envelop.desc.is_none(), "".into(), format!(", Desc: {}", envelop.desc.as_ref().unwrap()));
+            let desc = envelop.desc.as_ref().map(|desc| format!(", Desc: {}", desc)).unwrap_or_else(|| "".to_string());
             infos.push(format!("{}: {}{}{}",
                                header(&format!("Envelop #{}", i + 1)),
                                envelop.r#type.get_upper_name(),

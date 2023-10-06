@@ -265,13 +265,12 @@ fn select_envelop(meta: &TinyEncryptMeta) -> XResult<&TinyEncryptEnvelop> {
     }
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {
-        println!("#{} {}{}", i + 1,
+        let kid = iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid));
+        let desc = envelop.desc.as_ref().map(|desc| format!(", Desc: {}", desc)).unwrap_or_else(|| "".to_string());
+        println!("#{} {}{}{}", i + 1,
                  envelop.r#type.get_upper_name(),
-                 if envelop.kid.is_empty() {
-                     "".into()
-                 } else {
-                     format!(", Kid: {}", envelop.kid)
-                 }
+                 kid,
+                 desc,
         );
     });
 
