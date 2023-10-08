@@ -9,6 +9,7 @@ use crate::cmd_info::CmdInfo;
 
 mod util;
 mod util_ecdh;
+mod util_x25519;
 mod compress;
 mod config;
 mod spec;

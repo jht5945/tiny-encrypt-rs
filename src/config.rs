@@ -43,6 +43,7 @@ pub struct TinyEncryptConfigEnvelop {
     pub r#type: TinyEncryptEnvelopType,
     pub kid: String,
     pub desc: Option<String>,
+    pub args: Option<Vec<String>>,
     pub public_part: String,
 }
 
@@ -52,8 +53,23 @@ impl TinyEncryptConfig {
         let config_contents = opt_result!(
             fs::read_to_string(&resolved_file), "Read file: {}, failed: {}", file
         );
-        // TODO Replace with Human JSON
-        Ok(opt_result!(serde_json::from_str(&config_contents), "Parse file: {}, failed: {}", file))
+        let mut config: TinyEncryptConfig = opt_result!(
+            serde_json::from_str(&config_contents),"Parse file: {}, failed: {}", file);
+        let mut splitted_profiles = HashMap::new();
+        for (k, v) in config.profiles.into_iter() {
+            if !k.contains(",") {
+                splitted_profiles.insert(k, v);
+            } else {
+                k.split(",")
+                    .map(|k| k.trim())
+                    .filter(|k| k.len() > 0)
+                    .for_each(|k| {
+                        splitted_profiles.insert(k.to_string(), v.clone());
+                    });
+            }
+        }
+        config.profiles = splitted_profiles;
+        Ok(config)
     }
 
     pub fn find_envelops(&self, profile: &Option<String>) -> XResult<Vec<&TinyEncryptConfigEnvelop>> {

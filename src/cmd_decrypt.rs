@@ -6,8 +6,8 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use clap::Args;
+use openpgp_card::{OpenPgp, OpenPgpTransaction};
 use openpgp_card::crypto_data::Cryptogram;
-use openpgp_card::OpenPgp;
 use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_msg, util_term, warning, XResult};
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -19,7 +19,7 @@ use crate::{card, file, util};
 use crate::compress::GzStreamDecoder;
 use crate::crypto_aes::aes_gcm_decrypt;
 use crate::spec::{TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{ENC_AES256_GCM_P256, TINY_ENC_FILE_EXT};
+use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_X25519, TINY_ENC_FILE_EXT};
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -157,6 +157,7 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
 fn try_decrypt_key(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot: &Option<String>) -> XResult<Vec<u8>> {
     match envelop.r#type {
         TinyEncryptEnvelopType::Pgp => try_decrypt_key_pgp(envelop, pin),
+        TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
         TinyEncryptEnvelopType::Ecdh => try_decrypt_key_ecdh(envelop, pin, slot),
         unknown_type => {
             return simple_error!("Unknown or not supported type: {}", unknown_type.get_name());
@@ -167,7 +168,7 @@ fn try_decrypt_key(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot: &Op
 fn try_decrypt_key_ecdh(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot: &Option<String>) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
     if wrap_key.header.enc.as_str() != ENC_AES256_GCM_P256 {
-        return simple_error!("Unsupported header enc.");
+        return simple_error!("Unsupported header requires: {}, actual: {}", ENC_AES256_GCM_P256, &wrap_key.header.enc);
     }
     let e_pub_key = &wrap_key.header.e_pub_key;
     let e_pub_key_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
@@ -181,35 +182,46 @@ fn try_decrypt_key_ecdh(envelop: &TinyEncryptEnvelop, pin: &Option<String>, slot
     let retired_slot_id = opt_result!(RetiredSlotId::from_str(&slot), "Slot not found: {}");
     let slot_id = SlotId::Retired(retired_slot_id);
     opt_result!(yk.verify_pin(pin.as_bytes()), "YubiKey verify pin failed: {}");
-    let decrypted_shared_secret = opt_result!(decrypt_data(
+    let shared_secret = opt_result!(decrypt_data(
                 &mut yk,
                 &epk_bytes,
                 AlgorithmId::EccP256,
                 slot_id,
             ), "Decrypt via PIV card failed: {}");
-    let key = util::simple_kdf(decrypted_shared_secret.as_slice());
+    let key = util::simple_kdf(shared_secret.as_slice());
     let decrypted_key = aes_gcm_decrypt(&key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
     util::zeroize(key);
+    util::zeroize(shared_secret);
+    Ok(decrypted_key)
+}
+
+fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
+    let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
+    if wrap_key.header.enc.as_str() != ENC_AES256_GCM_X25519 {
+        return simple_error!("Unsupported header requires: {}, actual: {}", ENC_AES256_GCM_X25519, &wrap_key.header.enc);
+    }
+    let e_pub_key = &wrap_key.header.e_pub_key;
+    let epk_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
+
+    let mut pgp = get_openpgp()?;
+    let mut trans = opt_result!(pgp.transaction(), "Open card failed: {}");
+
+    read_and_verify_openpgp_pin(&mut trans, pin)?;
+
+    let shared_secret = trans.decipher(Cryptogram::ECDH(&epk_bytes))?;
+
+    let key = util::simple_kdf(shared_secret.as_slice());
+    let decrypted_key = aes_gcm_decrypt(&key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
+    util::zeroize(key);
+    util::zeroize(shared_secret);
     Ok(decrypted_key)
 }
 
 fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
-    let card = match card::get_card() {
-        Err(e) => {
-            failure!("Get PGP card failed: {}", e);
-            return simple_error!("Get card failed: {}", e);
-        }
-        Ok(card) => card
-    };
-    let mut pgp = OpenPgp::new(card);
+    let mut pgp = get_openpgp()?;
     let mut trans = opt_result!(pgp.transaction(), "Open card failed: {}");
 
-    let pin = read_pin(pin);
-    if let Err(e) = trans.verify_pw1_user(pin.as_ref()) {
-        failure!("Verify user pin failed: {}", e);
-        return simple_error!("User pin verify failed: {}", e);
-    }
-    success!("User pin verify success!");
+    read_and_verify_openpgp_pin(&mut trans, pin)?;
 
     let pgp_envelop = &envelop.encrypted_key;
     debugging!("PGP envelop: {}", &pgp_envelop);
@@ -217,6 +229,27 @@ fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XR
 
     let key = trans.decipher(Cryptogram::RSA(&pgp_envelop_bytes))?;
     Ok(key)
+}
+
+fn read_and_verify_openpgp_pin(trans: &mut OpenPgpTransaction, pin: &Option<String>) -> XResult<()> {
+    let pin = read_pin(pin);
+    if let Err(e) = trans.verify_pw1_user(pin.as_ref()) {
+        failure!("Verify user pin failed: {}", e);
+        return simple_error!("User pin verify failed: {}", e);
+    }
+    success!("User pin verify success!");
+    Ok(())
+}
+
+fn get_openpgp() -> XResult<OpenPgp> {
+    let card = match card::get_card() {
+        Err(e) => {
+            failure!("Get PGP card failed: {}", e);
+            return simple_error!("Get card failed: {}", e);
+        }
+        Ok(card) => card
+    };
+    Ok(OpenPgp::new(card))
 }
 
 fn read_slot(slot: &Option<String>) -> XResult<String> {

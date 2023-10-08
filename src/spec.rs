@@ -50,6 +50,8 @@ pub struct TinyEncryptEnvelop {
 pub enum TinyEncryptEnvelopType {
     #[serde(rename = "pgp")]
     Pgp,
+    #[serde(rename = "pgp-x25519")]
+    PgpX25519,
     #[serde(rename = "age")]
     Age,
     #[serde(rename = "ecdh")]
@@ -65,6 +67,7 @@ impl TinyEncryptEnvelopType {
     pub fn get_name(&self) -> &'static str {
         match self {
             TinyEncryptEnvelopType::Pgp => "pgp",
+            TinyEncryptEnvelopType::PgpX25519 => "pgp-x25519",
             TinyEncryptEnvelopType::Age => "age",
             TinyEncryptEnvelopType::Ecdh => "ecdh",
             TinyEncryptEnvelopType::Kms => "kms",

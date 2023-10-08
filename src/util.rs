@@ -9,6 +9,7 @@ use rust_util::{simple_error, warning, XResult};
 use zeroize::Zeroize;
 
 pub const ENC_AES256_GCM_P256: &str = "aes256-gcm-p256";
+pub const ENC_AES256_GCM_X25519: &str = "aes256-gcm-x25519";
 pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
 pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
 
@@ -28,10 +29,14 @@ pub fn require_tiny_enc_file_and_exists(path: impl AsRef<Path>) -> XResult<()> {
 
 pub fn require_file_exists(path: impl AsRef<Path>) -> XResult<()> {
     let path = path.as_ref();
-    match fs::metadata(path) {
-        Ok(_) => Ok(()),
-        Err(_) => simple_error!("File: {} not exists", path.display()),
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(_) => return simple_error!("File: {} not exists", path.display()),
+    };
+    if !metadata.is_file() {
+        return simple_error!("Path: {} is not a file", path.display());
     }
+    Ok(())
 }
 
 pub fn require_file_not_exists(path: impl AsRef<Path>) -> XResult<()> {
