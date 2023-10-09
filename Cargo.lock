@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "tiny-encrypt"
-version = "0.2.0"
+version = "0.2.3"
 dependencies = [
  "aes-gcm-stream",
  "base64",
@@ -2074,6 +2074,7 @@ dependencies = [
  "openpgp-card",
  "openpgp-card-pcsc",
  "p256",
+ "p384",
  "rand",
  "reqwest",
  "rpassword",

@@ -72,6 +72,18 @@ impl TinyEncryptConfig {
         Ok(config)
     }
 
+    pub fn find_first_arg_by_kid(&self, kid: &str) -> Option<&String> {
+        self.find_args_by_kid(kid).map(|a| a.iter().next()).flatten()
+    }
+
+    pub fn find_args_by_kid(&self, kid: &str) -> Option<&Vec<String>> {
+        self.find_by_kid(kid).map(|e| e.args.as_ref()).flatten()
+    }
+
+    pub fn find_by_kid(&self, kid: &str) -> Option<&TinyEncryptConfigEnvelop> {
+        self.envelops.iter().find(|e| e.kid == kid)
+    }
+
     pub fn find_envelops(&self, profile: &Option<String>) -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
         let profile = profile.as_ref().map(String::as_str).unwrap_or("default");
         debugging!("Profile: {}", profile);

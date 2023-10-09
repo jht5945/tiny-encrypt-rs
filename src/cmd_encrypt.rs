@@ -10,13 +10,13 @@ use rsa::Pkcs1v15Encrypt;
 use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_msg, warning, XResult};
 use zeroize::Zeroize;
 
-use crate::{util, util_ecdh, util_x25519};
+use crate::{util, util_ecdh, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::crypto_aes::aes_gcm_encrypt;
 use crate::crypto_rsa::parse_spki;
 use crate::spec::{EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_X25519, TINY_ENC_CONFIG_FILE};
+use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, TINY_ENC_CONFIG_FILE};
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
@@ -239,6 +239,9 @@ fn encrypt_envelops(key: &[u8], envelops: &[&TinyEncryptConfigEnvelop]) -> XResu
             TinyEncryptEnvelopType::Ecdh => {
                 encrypted_envelops.push(encrypt_envelop_ecdh(key, envelop)?);
             }
+            TinyEncryptEnvelopType::EcdhP384 => {
+                encrypted_envelops.push(encrypt_envelop_ecdh_p384(key, envelop)?);
+            }
             _ => return simple_error!("Not supported type: {:?}", envelop.r#type),
         }
     }
@@ -250,6 +253,13 @@ fn encrypt_envelop_ecdh(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResu
     let (shared_secret, ephemeral_spki) = util_ecdh::compute_shared_secret(public_key_point_hex)?;
 
     encrypt_envelop_shared_secret(key, &shared_secret, &ephemeral_spki, ENC_AES256_GCM_P256, envelop)
+}
+
+fn encrypt_envelop_ecdh_p384(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
+    let public_key_point_hex = &envelop.public_part;
+    let (shared_secret, ephemeral_spki) = util_p384::compute_p384_shared_secret(public_key_point_hex)?;
+
+    encrypt_envelop_shared_secret(key, &shared_secret, &ephemeral_spki, ENC_AES256_GCM_P384, envelop)
 }
 
 fn encrypt_envelop_ecdh_x25519(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {

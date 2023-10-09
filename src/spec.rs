@@ -56,6 +56,8 @@ pub enum TinyEncryptEnvelopType {
     Age,
     #[serde(rename = "ecdh")]
     Ecdh,
+    #[serde(rename = "ecdh-p384")]
+    EcdhP384,
     #[serde(rename = "kms")]
     Kms,
 }
@@ -70,6 +72,7 @@ impl TinyEncryptEnvelopType {
             TinyEncryptEnvelopType::PgpX25519 => "pgp-x25519",
             TinyEncryptEnvelopType::Age => "age",
             TinyEncryptEnvelopType::Ecdh => "ecdh",
+            TinyEncryptEnvelopType::EcdhP384 => "ecdh-p384",
             TinyEncryptEnvelopType::Kms => "kms",
         }
     }

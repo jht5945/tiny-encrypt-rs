@@ -1,7 +1,7 @@
 # tiny-encrypt-rs
 
-**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or CanoKey(https://www.canokeys.org/) is
-required, the Key NEED supports PIV or OpenPGP.
+**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) is
+required, the key MUST support PIV or OpenPGP.
 
 ![](https://cdn.hatter.ink/doc/7684_4DB4452911E2A25AB993429AA7FFCD65/yubikey-5-family.png)
 
@@ -37,7 +37,7 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
       "KID-1",
       "KID-2"
     ],
-    "leve2": [
+    "l2,leve2": [
       "KID-2"
     ]
   }

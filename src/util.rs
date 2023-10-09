@@ -9,6 +9,7 @@ use rust_util::{simple_error, warning, XResult};
 use zeroize::Zeroize;
 
 pub const ENC_AES256_GCM_P256: &str = "aes256-gcm-p256";
+pub const ENC_AES256_GCM_P384: &str = "aes256-gcm-p384";
 pub const ENC_AES256_GCM_X25519: &str = "aes256-gcm-x25519";
 pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
 pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
@@ -133,3 +134,11 @@ pub fn zeroize(object: impl Zeroize) {
     let mut object = object;
     object.zeroize();
 }
+
+pub fn read_line(ln: &str) {
+    print!("{}", ln);
+    io::stdout().flush().ok();
+    let mut buff = String::new();
+    let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");
+}
+
