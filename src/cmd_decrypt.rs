@@ -2,25 +2,30 @@ use std::{fs, io};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::Instant;
 
 use clap::Args;
 use openpgp_card::{OpenPgp, OpenPgpTransaction};
 use openpgp_card::crypto_data::Cryptogram;
-use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_msg, util_term, warning, XResult};
+use rust_util::{
+    debugging, failure, iff, information, opt_result, simple_error, success,
+    util_msg, util_term, warning, XResult,
+};
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
-use yubikey::piv::{AlgorithmId, decrypt_data, RetiredSlotId, SlotId};
+use yubikey::piv::{AlgorithmId, decrypt_data};
 use yubikey::YubiKey;
 use zeroize::Zeroize;
 
-use crate::{card, file, util};
+use crate::{card, file, util, util_piv};
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
 use crate::crypto_aes::aes_gcm_decrypt;
 use crate::spec::{TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
+use crate::util::{
+    ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
+    TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
+};
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -194,10 +199,11 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
     let epk_bytes = subject_public_key_info.subject_public_key.as_ref();
 
     let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
-    let retired_slot_id = opt_result!(RetiredSlotId::from_str(&slot), "Slot not found: {}");
-    let slot_id = SlotId::Retired(retired_slot_id);
+    let slot_id = util_piv::get_slot_id(&slot)?;
     opt_result!(yk.verify_pin(pin.as_bytes()), "YubiKey verify pin failed: {}");
-    let algo_id = iff!(expected_enc_type == ENC_AES256_GCM_P256, AlgorithmId::EccP256, AlgorithmId::EccP384);
+    let algo_id = iff!(
+        expected_enc_type == ENC_AES256_GCM_P256, AlgorithmId::EccP256, AlgorithmId::EccP384
+    );
     let shared_secret = opt_result!(decrypt_data(
                 &mut yk,
                 &epk_bytes,
@@ -322,7 +328,9 @@ fn select_envelop(meta: &TinyEncryptMeta) -> XResult<&TinyEncryptEnvelop> {
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {
         let kid = iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid));
-        let desc = envelop.desc.as_ref().map(|desc| format!(", Desc: {}", desc)).unwrap_or_else(|| "".to_string());
+        let desc = envelop.desc.as_ref()
+            .map(|desc| format!(", Desc: {}", desc))
+            .unwrap_or_else(|| "".to_string());
         println!("#{} {}{}{}", i + 1,
                  envelop.r#type.get_upper_name(),
                  kid,

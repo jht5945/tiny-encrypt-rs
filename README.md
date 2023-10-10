@@ -44,6 +44,15 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
 }
 ```
 
+Supported PKI encryption types:
+
+| Type       | Algorithm       | Description            |
+|------------|-----------------|------------------------|
+| pgp        | PKCS1-v1.5      | OpenPGP Encryption Key |
+| pgp-x25519 | ECDH(X25519)    | OpenPGP Encryption Key |
+| ecdh       | ECDH(secp256r1) | PIV Slot               |
+| ecdh-p384  | ECDH(secp384r1) | PIV Slot               |
+
 Smart Card(Yubikey) protected ECDH Encryption description:
 
 ```text

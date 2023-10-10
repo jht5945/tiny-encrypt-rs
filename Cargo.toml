@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -27,6 +27,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha256 = "1.4"
 simpledateformat = "0.1"
+tabled = "0.14"
 x25519-dalek = "2.0"
 x509-parser = "0.15"
 yubikey = { version = "0.8", features = ["untested"] }
