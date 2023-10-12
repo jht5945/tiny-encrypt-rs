@@ -4,6 +4,20 @@ use flate2::Compression;
 use flate2::write::{GzDecoder, GzEncoder};
 use rust_util::{simple_error, XResult};
 
+pub fn compress(compression: Compression, message: &[u8]) -> XResult<Vec<u8>> {
+    let mut encoder = GzStreamEncoder::new(compression);
+    let mut buff = encoder.update(message)?;
+    buff.extend_from_slice(&encoder.finalize()?);
+    Ok(buff)
+}
+
+pub fn decompress(message: &[u8]) -> XResult<Vec<u8>> {
+    let mut decoder = GzStreamDecoder::new();
+    let mut buff = decoder.update(message)?;
+    buff.extend_from_slice(&decoder.finalize()?);
+    Ok(buff)
+}
+
 pub struct GzStreamEncoder {
     gz_encoder: GzEncoder<Vec<u8>>,
 }

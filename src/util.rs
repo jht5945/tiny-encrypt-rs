@@ -1,6 +1,6 @@
 use std::{fs, io};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose;
@@ -17,6 +17,20 @@ pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
 pub const TINY_ENC_AES_GCM: &str = "AES/GCM";
 
 pub const TINY_ENC_MAGIC_TAG: u16 = 0x01;
+pub const TINY_ENC_COMPRESSED_MAGIC_TAG: u16 = 0x02;
+
+pub const SALT_COMMENT: &[u8] = b"salt:comment";
+pub const SALT_META: &[u8] = b"salt:meta";
+
+pub fn get_file_name(path: &PathBuf) -> String {
+    let path_display = format!("{}", path.display());
+    if path_display.contains("/") {
+        if let Some(p) = path_display.split("/").last() {
+            return p.to_string();
+        }
+    }
+    path_display
+}
 
 pub fn require_tiny_enc_file_and_exists(path: impl AsRef<Path>) -> XResult<()> {
     let path = path.as_ref();

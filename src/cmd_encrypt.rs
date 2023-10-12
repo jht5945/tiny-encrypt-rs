@@ -7,16 +7,16 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_msg, warning, XResult};
+use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_msg, warning, XResult};
 use zeroize::Zeroize;
 
-use crate::{util, util_ecdh, util_p384, util_x25519};
+use crate::{compress, util, util_ecdh, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
-use crate::crypto_aes::aes_gcm_encrypt;
+use crate::crypto_aes::{aes_gcm_encrypt, aes_gcm_encrypt_with_salt};
 use crate::crypto_rsa::parse_spki;
-use crate::spec::{EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, TINY_ENC_CONFIG_FILE};
+use crate::spec::{EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
+use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE};
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
@@ -44,6 +44,9 @@ pub struct CmdEncrypt {
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
+    /// Disable compress meta
+    #[arg(long)]
+    pub disable_compress_meta: bool,
 }
 
 pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
@@ -115,14 +118,19 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     let encrypted_comment = match &cmd_encrypt.encrypted_comment {
         None => None,
         Some(encrypted_comment) => Some(util::encode_base64(
-            &aes_gcm_encrypt(&key, &nonce, encrypted_comment.as_bytes())?))
+            &aes_gcm_encrypt_with_salt(&key, &nonce, SALT_COMMENT, encrypted_comment.as_bytes())?))
     };
+
+    let enc_encrypted_meta = EncEncryptedMeta {
+        filename: Some(util::get_file_name(path)),
+    };
+    let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(&key, &nonce), "Seal enc-encrypted-meta failed: {}");
 
     let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
         encrypted_comment,
-        encrypted_meta: None,
+        encrypted_meta: Some(util::encode_base64(&enc_encrypted_meta_bytes)),
         compress: cmd_encrypt.compress,
     };
 
@@ -150,10 +158,18 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         }
     }
 
+    let compress_meta = !cmd_encrypt.disable_compress_meta;
+
     let mut file_out = File::create(&path_out)?;
-    opt_result!(file_out.write_all(&util::TINY_ENC_MAGIC_TAG.to_be_bytes()), "Write tag failed: {}");
-    let encrypted_meta_bytes = opt_result!(serde_json::to_vec(&encrypt_meta), "Generate meta json bytes failed: {}");
+    let tag = iff!(compress_meta, util::TINY_ENC_COMPRESSED_MAGIC_TAG, util::TINY_ENC_MAGIC_TAG);
+    opt_result!(file_out.write_all(&tag.to_be_bytes()), "Write tag failed: {}");
+    let mut encrypted_meta_bytes = opt_result!(serde_json::to_vec(&encrypt_meta), "Generate meta json bytes failed: {}");
+    if compress_meta {
+        encrypted_meta_bytes = opt_result!(
+            compress::compress(Compression::default(), &encrypted_meta_bytes), "Compress encrypted meta failed: {}");
+    }
     let encrypted_meta_bytes_len = encrypted_meta_bytes.len() as u32;
+    debugging!("Encrypted meta len: {}", encrypted_meta_bytes_len);
     opt_result!(file_out.write_all(&encrypted_meta_bytes_len.to_be_bytes()), "Write meta len failed: {}");
     opt_result!(file_out.write_all(&encrypted_meta_bytes), "Write meta failed: {}");
 
@@ -281,7 +297,7 @@ fn encrypt_envelop_shared_secret(key: &[u8],
 
     let wrap_key = WrapKey {
         header: WrapKeyHeader {
-            kid: Some(envelop.kid.clone()),
+            kid: None, // Some(envelop.kid.clone()),
             enc: enc_type.to_string(),
             e_pub_key: util::encode_base64_url_no_pad(&ephemeral_spki),
         },

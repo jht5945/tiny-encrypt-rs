@@ -27,6 +27,7 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
             warning!("Parse Tiny Encrypt file info failed: {}", e);
         }
     }
+    println!();
     Ok(())
 }
 
@@ -95,7 +96,7 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     };
     infos.push(format!("{}: {}", header("Encryption algorithm"), encryption_algorithm));
 
-    success!("{}\n", infos.join("\n"));
+    success!("{}", infos.join("\n"));
     Ok(())
 }
 

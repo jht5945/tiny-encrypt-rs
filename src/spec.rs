@@ -1,10 +1,12 @@
 use std::fs::Metadata;
+use flate2::Compression;
 
-use rust_util::util_time;
+use rust_util::{opt_result, util_time, XResult};
 use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
+use crate::{compress, crypto_aes};
 
-use crate::util::{encode_base64, get_user_agent, TINY_ENC_AES_GCM};
+use crate::util::{encode_base64, get_user_agent, SALT_META, TINY_ENC_AES_GCM};
 
 pub const TINY_ENCRYPT_VERSION_10: &'static str = "1.0";
 pub const TINY_ENCRYPT_VERSION_11: &'static str = "1.1";
@@ -16,19 +18,30 @@ pub struct TinyEncryptMeta {
     pub version: String,
     pub created: u64,
     pub user_agent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub encrypted_comment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub encrypted_meta: Option<String>,
     // ---------------------------------------
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pgp_envelop: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pgp_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub age_envelop: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub age_recipient: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ecdh_envelop: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ecdh_point: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub envelop: Option<String>,
     // ---------------------------------------
     pub envelops: Option<Vec<TinyEncryptEnvelop>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub encryption_algorithm: Option<String>,
     pub nonce: String,
     pub file_length: u64,
@@ -41,6 +54,7 @@ pub struct TinyEncryptMeta {
 pub struct TinyEncryptEnvelop {
     pub r#type: TinyEncryptEnvelopType,
     pub kid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub desc: Option<String>,
     pub encrypted_key: String,
 }
@@ -75,6 +89,32 @@ impl TinyEncryptEnvelopType {
             TinyEncryptEnvelopType::EcdhP384 => "ecdh-p384",
             TinyEncryptEnvelopType::Kms => "kms",
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EncEncryptedMeta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+}
+
+impl EncEncryptedMeta {
+    pub fn unseal(key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Self> {
+        let mut decrypted = opt_result!(crypto_aes::try_aes_gcm_decrypt_with_salt(
+            key, nonce, SALT_META, message), "Decrypt failed: {}");
+        decrypted = opt_result!(compress::decompress(&decrypted), "Decode faield: {}");
+        let meta = opt_result!(
+            serde_json::from_slice::<Self>(&decrypted), "Parse failed: {}");
+        return Ok(meta);
+    }
+
+    pub fn seal(&self, key: &[u8], nonce: &[u8]) -> XResult<Vec<u8>> {
+        let mut encrypted_meta_json = serde_json::to_vec(self).unwrap();
+        encrypted_meta_json = opt_result!(
+            compress::compress(Compression::default(), &encrypted_meta_json), "Compress failed: {}");
+        let encrypted = opt_result!(crypto_aes::aes_gcm_encrypt_with_salt(
+                key, nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt failed: {}");
+        Ok(encrypted)
     }
 }
 

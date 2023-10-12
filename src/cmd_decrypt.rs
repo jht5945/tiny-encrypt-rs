@@ -20,12 +20,9 @@ use zeroize::Zeroize;
 use crate::{card, file, util, util_piv};
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
-use crate::crypto_aes::aes_gcm_decrypt;
-use crate::spec::{TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{
-    ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
-    TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
-};
+use crate::crypto_aes::{aes_gcm_decrypt, try_aes_gcm_decrypt_with_salt};
+use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
+use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -41,6 +38,9 @@ pub struct CmdDecrypt {
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
+    /// Skip decrypt file
+    #[arg(long)]
+    pub skip_decrypt_file: bool,
 }
 
 pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
@@ -105,21 +105,48 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     debugging!("Decrypt key: {}", hex::encode(&key));
     debugging!("Decrypt nonce: {}", hex::encode(&nonce));
 
-    let mut file_out = File::create(path_out)?;
+    if let Some(enc_encrypted_meta) = &meta.encrypted_meta {
+        let enc_encrypted_meta_bytes = opt_result!(
+            util::decode_base64(enc_encrypted_meta), "Decode enc-encrypted-meta failed: {}");
+        let enc_meta = opt_result!(
+            EncEncryptedMeta::unseal(&key, &nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
+        if let Some(filename) = &enc_meta.filename {
+            information!("Source filename: {}", filename);
+        }
+    }
 
-    let start = Instant::now();
-    util_msg::print_lastline(
-        &format!("Decrypting file: {}{} ...", path_display, iff!(meta.compress, " [compressed]", ""))
-    );
-    let _ = decrypt_file(&mut file_in, &mut file_out, &key, &nonce, meta.compress)?;
-    util_msg::clear_lastline();
-    let encrypt_duration = start.elapsed();
-    debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
+    if let Some(encrypted_comment) = &meta.encrypted_comment {
+        match util::decode_base64(encrypted_comment) {
+            Err(e) => warning!("Decode encrypted comment failed: {}", e),
+            Ok(ec_bytes) => match try_aes_gcm_decrypt_with_salt(&key, &nonce, SALT_COMMENT, &ec_bytes) {
+                Err(e) => warning!("Decrypt encrypted comment failed: {}", e),
+                Ok(decrypted_comment_bytes) => match String::from_utf8(decrypted_comment_bytes.clone()) {
+                    Err(_) => success!("Encrypted message hex: {}", hex::encode(&decrypted_comment_bytes)),
+                    Ok(message) => success!("Encrypted comment: {}", message),
+                }
+            }
+        }
+    }
+
+    if cmd_decrypt.skip_decrypt_file {
+        information!("Decrypt file is skipped.");
+    } else {
+        let mut file_out = File::create(path_out)?;
+
+        let start = Instant::now();
+        util_msg::print_lastline(
+            &format!("Decrypting file: {}{} ...", path_display, iff!(meta.compress, " [compressed]", ""))
+        );
+        let _ = decrypt_file(&mut file_in, &mut file_out, &key, &nonce, meta.compress)?;
+        util_msg::clear_lastline();
+        let encrypt_duration = start.elapsed();
+        debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
+        drop(file_out);
+    }
 
     util::zeroize(key);
     util::zeroize(nonce);
     drop(file_in);
-    drop(file_out);
     if cmd_decrypt.remove_file {
         match fs::remove_file(path) {
             Err(e) => warning!("Remove file: {} failed: {}", path_display, e),

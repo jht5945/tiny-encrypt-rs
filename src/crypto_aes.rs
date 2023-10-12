@@ -1,23 +1,46 @@
 use aes_gcm_stream::{Aes256GcmStreamDecryptor, Aes256GcmStreamEncryptor};
 use rust_util::{opt_result, XResult};
+use zeroize::Zeroize;
+
+pub fn try_aes_gcm_decrypt_with_salt(key: &[u8], nonce: &[u8], salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
+    let new_nonce = build_salted_nonce(nonce, salt);
+    if let Ok(decrypted) = aes_gcm_decrypt(key, &new_nonce, message) {
+        return Ok(decrypted);
+    }
+    aes_gcm_decrypt(key, nonce, message)
+}
 
 pub fn aes_gcm_decrypt(key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    let key: [u8; 32] = opt_result!(key.try_into(), "Invalid envelop: {}");
+    let mut key: [u8; 32] = opt_result!(key.try_into(), "Invalid envelop: {}");
     let mut aes256_gcm = Aes256GcmStreamDecryptor::new(key, nonce);
     let mut b1 = aes256_gcm.update(message);
     let b2 = opt_result!(aes256_gcm.finalize(), "Invalid envelop: {}");
     b1.extend_from_slice(&b2);
+    key.zeroize();
     Ok(b1)
 }
 
+pub fn aes_gcm_encrypt_with_salt(key: &[u8], nonce: &[u8], salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
+    let new_nonce = build_salted_nonce(nonce, salt);
+    aes_gcm_encrypt(key, &new_nonce, message)
+}
+
 pub fn aes_gcm_encrypt(key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    let key: [u8; 32] = opt_result!(key.try_into(), "Invalid envelop: {}");
+    let mut key: [u8; 32] = opt_result!(key.try_into(), "Invalid envelop: {}");
     let mut aes256_gcm = Aes256GcmStreamEncryptor::new(key, nonce);
     let mut b1 = aes256_gcm.update(message);
     let (b2, tag) = aes256_gcm.finalize();
     b1.extend_from_slice(&b2);
     b1.extend_from_slice(&tag);
+    key.zeroize();
     Ok(b1)
+}
+
+fn build_salted_nonce(nonce: &[u8], salt: &[u8]) -> Vec<u8> {
+    let mut nonce_with_salt = nonce.to_vec();
+    nonce_with_salt.extend_from_slice(salt);
+    let input = hex::decode(sha256::digest(nonce_with_salt)).unwrap();
+    input[0..12].to_vec()
 }
 
 #[test]

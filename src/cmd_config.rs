@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use clap::Args;
@@ -8,10 +9,22 @@ use tabled::settings::Style;
 use crate::config::TinyEncryptConfig;
 use crate::util::TINY_ENC_CONFIG_FILE;
 
-#[derive(Tabled)]
+#[derive(Tabled, Ord, Eq)]
 struct ConfigProfile {
     profiles: String,
     keys: String,
+}
+
+impl PartialEq<Self> for ConfigProfile {
+    fn eq(&self, other: &Self) -> bool {
+        self.profiles.eq(&other.profiles)
+    }
+}
+
+impl PartialOrd for ConfigProfile {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.profiles.partial_cmp(&other.profiles)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -57,6 +70,7 @@ pub fn config(_cmd_version: CmdConfig) -> XResult<()> {
             keys: ks.join("\n"),
         });
     }
+    config_profiles.sort();
 
     let mut table = Table::new(config_profiles);
     table.with(Style::modern());
