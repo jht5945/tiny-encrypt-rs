@@ -16,7 +16,7 @@ use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::crypto_aes::{aes_gcm_encrypt, aes_gcm_encrypt_with_salt};
 use crate::crypto_rsa::parse_spki;
 use crate::spec::{EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE};
+use crate::consts::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
@@ -100,7 +100,7 @@ pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
 
 fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
-    if path_display.ends_with(util::TINY_ENC_FILE_EXT) {
+    if path_display.ends_with(TINY_ENC_FILE_EXT) {
         information!("Tiny enc file skipped: {}", path_display);
         return Ok(0);
     }
@@ -109,7 +109,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
 
-    let path_out = format!("{}{}", path_display, util::TINY_ENC_FILE_EXT);
+    let path_out = format!("{}{}", path_display, TINY_ENC_FILE_EXT);
     util::require_file_not_exists(path_out.as_str())?;
 
     let (key, nonce) = util::make_key256_and_nonce();

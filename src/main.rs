@@ -9,6 +9,7 @@ use crate::cmd_encrypt::CmdEncrypt;
 use crate::cmd_info::CmdInfo;
 use crate::cmd_version::CmdVersion;
 
+mod consts;
 mod util;
 mod util_piv;
 mod util_ecdh;

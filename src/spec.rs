@@ -6,7 +6,8 @@ use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
 
 use crate::{compress, crypto_aes};
-use crate::util::{encode_base64, get_user_agent, SALT_META, TINY_ENC_AES_GCM};
+use crate::consts::{SALT_META, TINY_ENC_AES_GCM};
+use crate::util::{encode_base64, get_user_agent};
 
 pub const TINY_ENCRYPT_VERSION_10: &str = "1.0";
 pub const TINY_ENCRYPT_VERSION_11: &str = "1.1";

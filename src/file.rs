@@ -3,11 +3,12 @@ use std::io::{Read, Write};
 use flate2::Compression;
 use rust_util::{debugging, iff, opt_result, simple_error, XResult};
 
-use crate::{compress, util};
+use crate::compress;
+use crate::consts::{TINY_ENC_COMPRESSED_MAGIC_TAG, TINY_ENC_MAGIC_TAG};
 use crate::spec::TinyEncryptMeta;
 
 pub fn write_tiny_encrypt_meta<W: Write>(w: &mut W, meta: &TinyEncryptMeta, compress_meta: bool) -> XResult<usize> {
-    let tag = iff!(compress_meta, util::TINY_ENC_COMPRESSED_MAGIC_TAG, util::TINY_ENC_MAGIC_TAG);
+    let tag = iff!(compress_meta, TINY_ENC_COMPRESSED_MAGIC_TAG, TINY_ENC_MAGIC_TAG);
     opt_result!(w.write_all(&tag.to_be_bytes()), "Write tag failed: {}");
     let mut encrypted_meta_bytes = opt_result!(serde_json::to_vec(&meta), "Generate meta json bytes failed: {}");
     if compress_meta {
@@ -32,8 +33,8 @@ pub fn read_tiny_encrypt_meta<R: Read>(r: &mut R) -> XResult<TinyEncryptMeta> {
     let mut tag_buff = [0_u8; 2];
     opt_result!(r.read_exact(&mut tag_buff), "Read tag failed: {}");
     let tag = u16::from_be_bytes(tag_buff);
-    let is_normal_tiny_enc = tag == util::TINY_ENC_MAGIC_TAG;
-    let is_compressed_tiny_enc = tag == util::TINY_ENC_COMPRESSED_MAGIC_TAG;
+    let is_normal_tiny_enc = tag == TINY_ENC_MAGIC_TAG;
+    let is_compressed_tiny_enc = tag == TINY_ENC_COMPRESSED_MAGIC_TAG;
     if !is_normal_tiny_enc && !is_compressed_tiny_enc {
         return simple_error!("Tag is not 0x01 or 0x02, but is: 0x{:x}", tag);
     }

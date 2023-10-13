@@ -8,8 +8,8 @@ use clap::Args;
 use rust_util::{iff, opt_result, simple_error, success, util_time, warning, XResult};
 use simpledateformat::format_human2;
 
-use crate::{file, util};
-use crate::util::TINY_ENC_FILE_EXT;
+use crate::file;
+use crate::consts::{TINY_ENC_AES_GCM, TINY_ENC_FILE_EXT};
 
 #[derive(Debug, Args)]
 pub struct CmdInfo {
@@ -69,7 +69,7 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
                        format_human2(Duration::from_millis(now_millis - meta.created))
     ));
 
-    meta.envelops.as_ref().map(|envelops|
+    if let Some(envelops) = meta.envelops.as_ref() {
         envelops.iter().enumerate().for_each(|(i, envelop)| {
             let kid = iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid));
             let desc = envelop.desc.as_ref().map(|desc| format!(", Desc: {}", desc)).unwrap_or_else(|| "".to_string());
@@ -80,7 +80,8 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
                                desc
             ));
         })
-    );
+    }
+
     if let Some(fingerprint) = meta.pgp_fingerprint {
         infos.push(format!("{}: {}", header("PGP fingerprint"), fingerprint));
     }
@@ -92,7 +93,7 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     let encryption_algorithm = if let Some(encryption_algorithm) = &meta.encryption_algorithm {
         encryption_algorithm.to_string()
     } else {
-        format!("{} (default)", util::TINY_ENC_AES_GCM)
+        format!("{} (default)", TINY_ENC_AES_GCM)
     };
     infos.push(format!("{}: {}", header("Encryption algorithm"), encryption_algorithm));
 

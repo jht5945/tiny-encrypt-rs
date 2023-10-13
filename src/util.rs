@@ -8,19 +8,7 @@ use rand::random;
 use rust_util::{simple_error, warning, XResult};
 use zeroize::Zeroize;
 
-pub const ENC_AES256_GCM_P256: &str = "aes256-gcm-p256";
-pub const ENC_AES256_GCM_P384: &str = "aes256-gcm-p384";
-pub const ENC_AES256_GCM_X25519: &str = "aes256-gcm-x25519";
-pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
-pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
-
-pub const TINY_ENC_AES_GCM: &str = "AES/GCM";
-
-pub const TINY_ENC_MAGIC_TAG: u16 = 0x01;
-pub const TINY_ENC_COMPRESSED_MAGIC_TAG: u16 = 0x02;
-
-pub const SALT_COMMENT: &[u8] = b"salt:comment";
-pub const SALT_META: &[u8] = b"salt:meta";
+use crate::consts::TINY_ENC_FILE_EXT;
 
 pub fn get_file_name(path: &Path) -> String {
     let path_display = format!("{}", path.display());

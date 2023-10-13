@@ -7,9 +7,9 @@ use tabled::{Table, Tabled};
 use tabled::settings::Style;
 
 use crate::config::TinyEncryptConfig;
-use crate::util::TINY_ENC_CONFIG_FILE;
+use crate::consts::TINY_ENC_CONFIG_FILE;
 
-#[derive(Tabled, Ord, Eq)]
+#[derive(Tabled, Eq)]
 struct ConfigProfile {
     profiles: String,
     keys: String,
@@ -18,6 +18,12 @@ struct ConfigProfile {
 impl PartialEq<Self> for ConfigProfile {
     fn eq(&self, other: &Self) -> bool {
         self.profiles.eq(&other.profiles)
+    }
+}
+
+impl Ord for ConfigProfile {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.profiles.cmp(&other.profiles)
     }
 }
 
