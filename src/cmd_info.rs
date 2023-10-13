@@ -81,12 +81,12 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
             ));
         })
     );
-    meta.pgp_fingerprint.map(|fingerprint| {
+    if let Some(fingerprint) = meta.pgp_fingerprint {
         infos.push(format!("{}: {}", header("PGP fingerprint"), fingerprint));
-    });
-    meta.comment.map(|comment| {
+    }
+    if let Some(comment) = meta.comment {
         infos.push(format!("{}: {}", header("Comment"), comment));
-    });
+    }
     infos.push(format!("{}: {}", header("Encrypted comment"), to_yes_or_no(&meta.encrypted_comment)));
     infos.push(format!("{}: {}", header("Encrypted meta"), to_yes_or_no(&meta.encrypted_meta)));
     let encryption_algorithm = if let Some(encryption_algorithm) = &meta.encryption_algorithm {

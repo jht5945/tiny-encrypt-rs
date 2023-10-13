@@ -1,15 +1,15 @@
 use std::fs::Metadata;
-use flate2::Compression;
 
+use flate2::Compression;
 use rust_util::{opt_result, util_time, XResult};
 use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
-use crate::{compress, crypto_aes};
 
+use crate::{compress, crypto_aes};
 use crate::util::{encode_base64, get_user_agent, SALT_META, TINY_ENC_AES_GCM};
 
-pub const TINY_ENCRYPT_VERSION_10: &'static str = "1.0";
-pub const TINY_ENCRYPT_VERSION_11: &'static str = "1.1";
+pub const TINY_ENCRYPT_VERSION_10: &str = "1.0";
+pub const TINY_ENCRYPT_VERSION_11: &str = "1.1";
 
 /// Specification: [Tiny Encrypt Spec V1.1](https://git.hatter.ink/hatter/tiny-encrypt-java/src/branch/master/TinyEncryptSpecV1.1.md)
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -105,7 +105,7 @@ impl EncEncryptedMeta {
         decrypted = opt_result!(compress::decompress(&decrypted), "Decode faield: {}");
         let meta = opt_result!(
             serde_json::from_slice::<Self>(&decrypted), "Parse failed: {}");
-        return Ok(meta);
+        Ok(meta)
     }
 
     pub fn seal(&self, key: &[u8], nonce: &[u8]) -> XResult<Vec<u8>> {

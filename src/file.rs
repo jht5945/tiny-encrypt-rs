@@ -1,20 +1,25 @@
 use std::io::{Read, Write};
 
-use rust_util::{debugging, opt_result, simple_error, XResult};
+use flate2::Compression;
+use rust_util::{debugging, iff, opt_result, simple_error, XResult};
 
-use crate::spec::TinyEncryptMeta;
 use crate::{compress, util};
+use crate::spec::TinyEncryptMeta;
 
-pub fn _write_tiny_encrypt_meta<W: Write>(w: &mut W, meta: &TinyEncryptMeta) -> XResult<usize> {
-    let meta_json = opt_result!( serde_json::to_string(meta), "Meta to JSON failed: {}");
-    let meta_json_bytes = meta_json.as_bytes();
-    let meta_json_bytes_len = meta_json_bytes.len();
+pub fn write_tiny_encrypt_meta<W: Write>(w: &mut W, meta: &TinyEncryptMeta, compress_meta: bool) -> XResult<usize> {
+    let tag = iff!(compress_meta, util::TINY_ENC_COMPRESSED_MAGIC_TAG, util::TINY_ENC_MAGIC_TAG);
+    opt_result!(w.write_all(&tag.to_be_bytes()), "Write tag failed: {}");
+    let mut encrypted_meta_bytes = opt_result!(serde_json::to_vec(&meta), "Generate meta json bytes failed: {}");
+    if compress_meta {
+        encrypted_meta_bytes = opt_result!(
+            compress::compress(Compression::default(), &encrypted_meta_bytes), "Compress encrypted meta failed: {}");
+    }
+    let encrypted_meta_bytes_len = encrypted_meta_bytes.len() as u32;
+    debugging!("Encrypted meta len: {}", encrypted_meta_bytes_len);
+    opt_result!(w.write_all(&encrypted_meta_bytes_len.to_be_bytes()), "Write meta len failed: {}");
+    opt_result!(w.write_all(&encrypted_meta_bytes), "Write meta failed: {}");
 
-    opt_result!(w.write_all(&((0x01) as u16).to_be_bytes()), "Write tag failed: {}");
-    opt_result!(w.write_all(&(meta_json_bytes_len as u32).to_be_bytes()), "Write length failed: {}");
-    opt_result!(w.write_all(&meta_json_bytes), "Write meta failed: {}");
-
-    Ok(meta_json_bytes_len + 2 + 4)
+    Ok(encrypted_meta_bytes.len() + 2 + 4)
 }
 
 pub fn read_tiny_encrypt_meta_and_normalize<R: Read>(r: &mut R) -> XResult<TinyEncryptMeta> {
@@ -30,7 +35,7 @@ pub fn read_tiny_encrypt_meta<R: Read>(r: &mut R) -> XResult<TinyEncryptMeta> {
     let is_normal_tiny_enc = tag == util::TINY_ENC_MAGIC_TAG;
     let is_compressed_tiny_enc = tag == util::TINY_ENC_COMPRESSED_MAGIC_TAG;
     if !is_normal_tiny_enc && !is_compressed_tiny_enc {
-        return simple_error!("Tag is not 0x01, but is: 0x{:x}", tag);
+        return simple_error!("Tag is not 0x01 or 0x02, but is: 0x{:x}", tag);
     }
 
     let mut length_buff = [0_u8; 4];

@@ -1,6 +1,6 @@
 use std::{fs, io};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use base64::Engine;
 use base64::engine::general_purpose;
@@ -22,10 +22,10 @@ pub const TINY_ENC_COMPRESSED_MAGIC_TAG: u16 = 0x02;
 pub const SALT_COMMENT: &[u8] = b"salt:comment";
 pub const SALT_META: &[u8] = b"salt:meta";
 
-pub fn get_file_name(path: &PathBuf) -> String {
+pub fn get_file_name(path: &Path) -> String {
     let path_display = format!("{}", path.display());
-    if path_display.contains("/") {
-        if let Some(p) = path_display.split("/").last() {
+    if path_display.contains('/') {
+        if let Some(p) = path_display.split('/').last() {
             return p.to_string();
         }
     }
@@ -80,8 +80,7 @@ pub fn simple_kdf(input: &[u8]) -> Vec<u8> {
     let input = hex::decode(sha256::digest(input)).unwrap();
     let input = hex::decode(sha256::digest(input)).unwrap();
     let input = hex::decode(sha256::digest(input)).unwrap();
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    input
+    hex::decode(sha256::digest(input)).unwrap()
 }
 
 pub fn decode_base64(input: &str) -> XResult<Vec<u8>> {

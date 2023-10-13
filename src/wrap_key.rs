@@ -37,7 +37,7 @@ impl WrapKey {
         if !wk.starts_with("WK:") {
             return simple_error!("Wrap key string must starts with WK:");
         }
-        let wks = wk.split(".").collect::<Vec<_>>();
+        let wks = wk.split('.').collect::<Vec<_>>();
         if wks.len() != 3 {
             return simple_error!("Invalid wrap key.");
         }

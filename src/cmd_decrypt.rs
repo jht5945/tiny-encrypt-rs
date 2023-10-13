@@ -160,7 +160,7 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
     let mut total_len = 0;
     let mut buffer = [0u8; 1024 * 8];
     let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
-    let mut decryptor = aes_gcm_stream::Aes256GcmStreamDecryptor::new(key, &nonce);
+    let mut decryptor = aes_gcm_stream::Aes256GcmStreamDecryptor::new(key, nonce);
     let mut gz_decoder = GzStreamDecoder::new();
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
@@ -202,9 +202,7 @@ fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
         TinyEncryptEnvelopType::Ecdh => try_decrypt_key_ecdh(config, envelop, pin, ENC_AES256_GCM_P256, slot),
         TinyEncryptEnvelopType::EcdhP384 => try_decrypt_key_ecdh(config, envelop, pin, ENC_AES256_GCM_P384, slot),
-        unknown_type => {
-            return simple_error!("Unknown or not supported type: {}", unknown_type.get_name());
-        }
+        unknown_type => simple_error!("Unknown or not supported type: {}", unknown_type.get_name()),
     }
 }
 
@@ -233,7 +231,7 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
     );
     let shared_secret = opt_result!(decrypt_data(
                 &mut yk,
-                &epk_bytes,
+                epk_bytes,
                 algo_id,
                 slot_id,
             ), "Decrypt via PIV card failed: {}");
@@ -274,7 +272,7 @@ fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XR
 
     let pgp_envelop = &envelop.encrypted_key;
     debugging!("PGP envelop: {}", &pgp_envelop);
-    let pgp_envelop_bytes = opt_result!(util::decode_base64(&pgp_envelop), "Decode PGP envelop failed: {}");
+    let pgp_envelop_bytes = opt_result!(util::decode_base64(pgp_envelop), "Decode PGP envelop failed: {}");
 
     let key = trans.decipher(Cryptogram::RSA(&pgp_envelop_bytes))?;
     Ok(key)

@@ -57,12 +57,12 @@ impl TinyEncryptConfig {
             serde_json::from_str(&config_contents),"Parse file: {}, failed: {}", file);
         let mut splitted_profiles = HashMap::new();
         for (k, v) in config.profiles.into_iter() {
-            if !k.contains(",") {
+            if !k.contains(',') {
                 splitted_profiles.insert(k, v);
             } else {
-                k.split(",")
+                k.split(',')
                     .map(|k| k.trim())
-                    .filter(|k| k.len() > 0)
+                    .filter(|k| !k.is_empty())
                     .for_each(|k| {
                         splitted_profiles.insert(k.to_string(), v.clone());
                     });
@@ -73,11 +73,11 @@ impl TinyEncryptConfig {
     }
 
     pub fn find_first_arg_by_kid(&self, kid: &str) -> Option<&String> {
-        self.find_args_by_kid(kid).map(|a| a.iter().next()).flatten()
+        self.find_args_by_kid(kid).and_then(|a| a.iter().next())
     }
 
     pub fn find_args_by_kid(&self, kid: &str) -> Option<&Vec<String>> {
-        self.find_by_kid(kid).map(|e| e.args.as_ref()).flatten()
+        self.find_by_kid(kid).and_then(|e| e.args.as_ref())
     }
 
     pub fn find_by_kid(&self, kid: &str) -> Option<&TinyEncryptConfigEnvelop> {
@@ -103,7 +103,7 @@ impl TinyEncryptConfig {
             }
         }
         let mut envelops: Vec<_> = matched_envelops_map.values()
-            .map(|envelop| *envelop)
+            .copied()
             .collect();
         if envelops.is_empty() {
             return simple_error!("Profile: {} has no valid envelopes found", profile);

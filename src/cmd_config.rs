@@ -74,7 +74,7 @@ pub fn config(_cmd_version: CmdConfig) -> XResult<()> {
 
     let mut table = Table::new(config_profiles);
     table.with(Style::modern());
-    println!("{}", table.to_string());
+    println!("{}", table);
 
     Ok(())
 }

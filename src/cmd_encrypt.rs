@@ -7,10 +7,10 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_msg, warning, XResult};
+use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_msg, warning, XResult};
 use zeroize::Zeroize;
 
-use crate::{compress, util, util_ecdh, util_p384, util_x25519};
+use crate::{file, util, util_ecdh, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::crypto_aes::{aes_gcm_encrypt, aes_gcm_encrypt_with_salt};
@@ -113,7 +113,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     util::require_file_not_exists(path_out.as_str())?;
 
     let (key, nonce) = util::make_key256_and_nonce();
-    let envelops = encrypt_envelops(&key, &envelops)?;
+    let envelops = encrypt_envelops(&key, envelops)?;
 
     let encrypted_comment = match &cmd_encrypt.encrypted_comment {
         None => None,
@@ -138,6 +138,10 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     debugging!("Encrypted meta: {:?}", encrypt_meta);
 
     if cmd_encrypt.compatible_with_1_0 {
+        if !cmd_encrypt.disable_compress_meta {
+            return simple_error!("Compatible with 1.0 mode must turns --disable-compress-meta on.");
+        }
+
         if let Some(envelops) = encrypt_meta.envelops {
             let mut filter_envelops = vec![];
             for envelop in envelops {
@@ -158,20 +162,9 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         }
     }
 
-    let compress_meta = !cmd_encrypt.disable_compress_meta;
-
     let mut file_out = File::create(&path_out)?;
-    let tag = iff!(compress_meta, util::TINY_ENC_COMPRESSED_MAGIC_TAG, util::TINY_ENC_MAGIC_TAG);
-    opt_result!(file_out.write_all(&tag.to_be_bytes()), "Write tag failed: {}");
-    let mut encrypted_meta_bytes = opt_result!(serde_json::to_vec(&encrypt_meta), "Generate meta json bytes failed: {}");
-    if compress_meta {
-        encrypted_meta_bytes = opt_result!(
-            compress::compress(Compression::default(), &encrypted_meta_bytes), "Compress encrypted meta failed: {}");
-    }
-    let encrypted_meta_bytes_len = encrypted_meta_bytes.len() as u32;
-    debugging!("Encrypted meta len: {}", encrypted_meta_bytes_len);
-    opt_result!(file_out.write_all(&encrypted_meta_bytes_len.to_be_bytes()), "Write meta len failed: {}");
-    opt_result!(file_out.write_all(&encrypted_meta_bytes), "Write meta failed: {}");
+    let compress_meta = !cmd_encrypt.disable_compress_meta;
+    let _ = file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
 
     let start = Instant::now();
     util_msg::print_lastline(&format!("Encrypting file: {} ...", path_display));
@@ -207,7 +200,7 @@ fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
             GzStreamEncoder::new(Compression::new(*compress_level))
         }
     };
-    let mut encryptor = aes_gcm_stream::Aes256GcmStreamEncryptor::new(key, &nonce);
+    let mut encryptor = aes_gcm_stream::Aes256GcmStreamEncryptor::new(key, nonce);
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
         if len == 0 {
@@ -299,7 +292,7 @@ fn encrypt_envelop_shared_secret(key: &[u8],
         header: WrapKeyHeader {
             kid: None, // Some(envelop.kid.clone()),
             enc: enc_type.to_string(),
-            e_pub_key: util::encode_base64_url_no_pad(&ephemeral_spki),
+            e_pub_key: util::encode_base64_url_no_pad(ephemeral_spki),
         },
         nonce,
         encrypted_data: encrypted_key,
