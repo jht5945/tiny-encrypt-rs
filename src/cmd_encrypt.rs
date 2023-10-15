@@ -8,15 +8,16 @@ use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
 use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_msg, warning, XResult};
+use rust_util::util_time::UnixEpochTime;
 use zeroize::Zeroize;
 
 use crate::{file, util, util_ecdh, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
+use crate::consts::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 use crate::crypto_aes::{aes_gcm_encrypt, aes_gcm_encrypt_with_salt};
 use crate::crypto_rsa::parse_spki;
 use crate::spec::{EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::consts::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
@@ -121,12 +122,14 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
             &aes_gcm_encrypt_with_salt(&key, &nonce, SALT_COMMENT, encrypted_comment.as_bytes())?))
     };
 
+    let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
     let enc_encrypted_meta = EncEncryptedMeta {
         filename: Some(util::get_file_name(path)),
+        c_time: file_metadata.created().ok().map(|t| t.to_millis()).flatten(),
+        m_time: file_metadata.modified().ok().map(|t| t.to_millis()).flatten(),
     };
     let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(&key, &nonce), "Seal enc-encrypted-meta failed: {}");
 
-    let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
         encrypted_comment,

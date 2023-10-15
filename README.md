@@ -7,6 +7,8 @@ required, the key MUST support PIV or OpenPGP.
 
 Tiny encrypt for Rust
 
+Specification: [Tiny Encrypt Spec V1.1](https://github.com/OpenWebStandard/tiny-encrypt-format-spec/blob/main/TinyEncryptSpecv1.1.md)
+
 > Tiny encrypt rs is a Rust implementation of Tiny encrypt java https://git.hatter.ink/hatter/tiny-encrypt-java <br>
 > Tiny encrypt spec see: https://github.com/OpenWebStandard/tiny-encrypt-format-spec
 

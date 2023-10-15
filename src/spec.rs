@@ -12,7 +12,7 @@ use crate::util::{encode_base64, get_user_agent};
 pub const TINY_ENCRYPT_VERSION_10: &str = "1.0";
 pub const TINY_ENCRYPT_VERSION_11: &str = "1.1";
 
-/// Specification: [Tiny Encrypt Spec V1.1](https://git.hatter.ink/hatter/tiny-encrypt-java/src/branch/master/TinyEncryptSpecV1.1.md)
+/// Specification: [Tiny Encrypt Spec V1.1](https://github.com/OpenWebStandard/tiny-encrypt-format-spec/blob/main/TinyEncryptSpecv1.1.md)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TinyEncryptMeta {
@@ -97,6 +97,10 @@ impl TinyEncryptEnvelopType {
 pub struct EncEncryptedMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub c_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub m_time: Option<u64>,
 }
 
 impl EncEncryptedMeta {

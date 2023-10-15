@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -13,6 +13,7 @@ base64 = "0.21"
 chrono = "0.4"
 clap = { version = "4.1", features = ["derive"] }
 flate2 = "1.0"
+fs-set-times = "0.20.0"
 hex = "0.4"
 openpgp-card = "0.3"
 openpgp-card-pcsc = "0.3"

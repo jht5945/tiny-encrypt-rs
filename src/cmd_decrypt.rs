@@ -2,15 +2,17 @@ use std::{fs, io};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use clap::Args;
+use fs_set_times::SystemTimeSpec;
 use openpgp_card::{OpenPgp, OpenPgpTransaction};
 use openpgp_card::crypto_data::Cryptogram;
 use rust_util::{
     debugging, failure, iff, information, opt_result, simple_error, success,
     util_msg, util_term, warning, XResult,
 };
+use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
 use yubikey::piv::{AlgorithmId, decrypt_data};
@@ -20,9 +22,9 @@ use zeroize::Zeroize;
 use crate::{card, file, util, util_piv};
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
+use crate::consts::{DATE_TIME_FORMAT, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 use crate::crypto_aes::{aes_gcm_decrypt, try_aes_gcm_decrypt_with_salt};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::consts::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -102,46 +104,28 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     let key = try_decrypt_key(config, selected_envelop, pin, slot)?;
     let nonce = opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}");
 
-    debugging!("Decrypt key: {}", hex::encode(&key));
+    // debugging!("Decrypt key: {}", hex::encode(&key));
     debugging!("Decrypt nonce: {}", hex::encode(&nonce));
 
-    if let Some(enc_encrypted_meta) = &meta.encrypted_meta {
-        let enc_encrypted_meta_bytes = opt_result!(
-            util::decode_base64(enc_encrypted_meta), "Decode enc-encrypted-meta failed: {}");
-        let enc_meta = opt_result!(
-            EncEncryptedMeta::unseal(&key, &nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
-        if let Some(filename) = &enc_meta.filename {
-            information!("Source filename: {}", filename);
-        }
-    }
-
-    if let Some(encrypted_comment) = &meta.encrypted_comment {
-        match util::decode_base64(encrypted_comment) {
-            Err(e) => warning!("Decode encrypted comment failed: {}", e),
-            Ok(ec_bytes) => match try_aes_gcm_decrypt_with_salt(&key, &nonce, SALT_COMMENT, &ec_bytes) {
-                Err(e) => warning!("Decrypt encrypted comment failed: {}", e),
-                Ok(decrypted_comment_bytes) => match String::from_utf8(decrypted_comment_bytes.clone()) {
-                    Err(_) => success!("Encrypted message hex: {}", hex::encode(&decrypted_comment_bytes)),
-                    Ok(message) => success!("Encrypted comment: {}", message),
-                }
-            }
-        }
-    }
+    let enc_meta = parse_encrypted_meta(&meta, &key, &nonce)?;
+    parse_encrypted_comment(&meta, &key, &nonce)?;
 
     if cmd_decrypt.skip_decrypt_file {
         information!("Decrypt file is skipped.");
     } else {
-        let mut file_out = File::create(path_out)?;
-
         let start = Instant::now();
         util_msg::print_lastline(
             &format!("Decrypting file: {}{} ...", path_display, iff!(meta.compress, " [compressed]", ""))
         );
+
+        let mut file_out = File::create(path_out)?;
         let _ = decrypt_file(&mut file_in, &mut file_out, &key, &nonce, meta.compress)?;
-        util_msg::clear_lastline();
-        let encrypt_duration = start.elapsed();
-        debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
         drop(file_out);
+        util_msg::clear_lastline();
+
+        update_out_file_time(enc_meta, path_out);
+        let encrypt_duration = start.elapsed();
+        debugging!("Inner decrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
     }
 
     util::zeroize(key);
@@ -191,6 +175,63 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
     let mut key = key;
     key.zeroize();
     Ok(total_len)
+}
+
+fn update_out_file_time(enc_meta: Option<EncEncryptedMeta>, path_out: &str) {
+    if let Some(enc_meta) = &enc_meta {
+        let create_time = enc_meta.c_time.map(|t| SystemTime::from_millis(t));
+        let modify_time = enc_meta.m_time.map(|t| SystemTime::from_millis(t));
+        if create_time.is_some() || modify_time.is_some() {
+            let set_times_result = fs_set_times::set_times(
+                path_out,
+                create_time.map(|t| SystemTimeSpec::Absolute(t)),
+                modify_time.map(|t| SystemTimeSpec::Absolute(t)),
+            );
+            match set_times_result {
+                Ok(_) => information!("Set file time succeed."),
+                Err(e) => warning!("Set file time failed: {}", e),
+            }
+        }
+    }
+}
+
+fn parse_encrypted_comment(meta: &TinyEncryptMeta, key: &[u8], nonce: &[u8]) -> XResult<()> {
+    if let Some(encrypted_comment) = &meta.encrypted_comment {
+        match util::decode_base64(encrypted_comment) {
+            Err(e) => warning!("Decode encrypted comment failed: {}", e),
+            Ok(ec_bytes) => match try_aes_gcm_decrypt_with_salt(&key, &nonce, SALT_COMMENT, &ec_bytes) {
+                Err(e) => warning!("Decrypt encrypted comment failed: {}", e),
+                Ok(decrypted_comment_bytes) => match String::from_utf8(decrypted_comment_bytes.clone()) {
+                    Err(_) => success!("Encrypted message hex: {}", hex::encode(&decrypted_comment_bytes)),
+                    Ok(message) => success!("Encrypted comment: {}", message),
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_encrypted_meta(meta: &TinyEncryptMeta, key: &[u8], nonce: &[u8]) -> XResult<Option<EncEncryptedMeta>> {
+    Ok(match &meta.encrypted_meta {
+        None => None,
+        Some(enc_encrypted_meta) => {
+            let enc_encrypted_meta_bytes = opt_result!(
+            util::decode_base64(enc_encrypted_meta), "Decode enc-encrypted-meta failed: {}");
+            let enc_meta = opt_result!(
+            EncEncryptedMeta::unseal(&key, &nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
+            if let Some(filename) = &enc_meta.filename {
+                information!("Source filename: {}", filename);
+            }
+            let fmt = simpledateformat::fmt(DATE_TIME_FORMAT).unwrap();
+            if let Some(c_time) = &enc_meta.c_time {
+                information!("Source file create time: {}", fmt.format_local(SystemTime::from_millis(*c_time)));
+            }
+            if let Some(m_time) = &enc_meta.c_time {
+                information!("Source file modified time: {}", fmt.format_local(SystemTime::from_millis(*m_time)));
+            }
+            Some(enc_meta)
+        }
+    })
 }
 
 fn try_decrypt_key(config: &Option<TinyEncryptConfig>,

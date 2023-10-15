@@ -1,15 +1,15 @@
 use std::cmp::max;
 use std::fs::File;
-use std::ops::Add;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clap::Args;
-use rust_util::{iff, opt_result, simple_error, success, util_time, warning, XResult};
+use rust_util::{util_time, iff, opt_result, simple_error, success, warning, XResult};
+use rust_util::util_time::UnixEpochTime;
 use simpledateformat::format_human2;
 
+use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM, TINY_ENC_FILE_EXT};
 use crate::file;
-use crate::consts::{TINY_ENC_AES_GCM, TINY_ENC_FILE_EXT};
 
 #[derive(Debug, Args)]
 pub struct CmdInfo {
@@ -57,15 +57,15 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     );
 
     let now_millis = util_time::get_current_millis() as u64;
-    let fmt = simpledateformat::fmt("EEE MMM dd HH:mm:ss z yyyy").unwrap();
+    let fmt = simpledateformat::fmt(DATE_TIME_FORMAT).unwrap();
     infos.push(format!("{}: {}, {} ago",
                        header("Last modified"),
-                       fmt.format_local(from_unix_epoch(meta.file_last_modified)),
+                       fmt.format_local(SystemTime::from_millis(meta.file_last_modified)),
                        format_human2(Duration::from_millis(now_millis - meta.file_last_modified))
     ));
     infos.push(format!("{}: {}, {} ago",
                        header("Created"),
-                       fmt.format_local(from_unix_epoch(meta.created)),
+                       fmt.format_local(SystemTime::from_millis(meta.created)),
                        format_human2(Duration::from_millis(now_millis - meta.created))
     ));
 
@@ -99,10 +99,6 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
 
     success!("{}", infos.join("\n"));
     Ok(())
-}
-
-fn from_unix_epoch(t: u64) -> SystemTime {
-    SystemTime::UNIX_EPOCH.add(Duration::from_millis(t))
 }
 
 fn header(h: &str) -> String {

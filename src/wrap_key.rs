@@ -14,6 +14,7 @@ pub struct WrapKey {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WrapKeyHeader {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub kid: Option<String>,
     pub enc: String,
     pub e_pub_key: String,

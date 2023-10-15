@@ -16,3 +16,5 @@ pub const TINY_ENC_COMPRESSED_MAGIC_TAG: u16 = 0x02;
 // Encryption nonce salt
 pub const SALT_COMMENT: &[u8] = b"salt:comment";
 pub const SALT_META: &[u8] = b"salt:meta";
+
+pub const DATE_TIME_FORMAT: &str = "EEE MMM dd HH:mm:ss z yyyy";
