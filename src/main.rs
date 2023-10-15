@@ -11,6 +11,7 @@ use crate::cmd_version::CmdVersion;
 
 mod consts;
 mod util;
+mod util_process;
 mod util_piv;
 mod util_pgp;
 mod util_ecdh;

@@ -1,6 +1,4 @@
-use aes_gcm_stream::{Aes256GcmStreamDecryptor, Aes256GcmStreamEncryptor};
 use rust_util::{opt_result, XResult};
-use zeroize::Zeroize;
 
 pub fn try_aes_gcm_decrypt_with_salt(key: &[u8], nonce: &[u8], salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
     let new_nonce = build_salted_nonce(nonce, salt);
@@ -11,13 +9,7 @@ pub fn try_aes_gcm_decrypt_with_salt(key: &[u8], nonce: &[u8], salt: &[u8], mess
 }
 
 pub fn aes_gcm_decrypt(key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    let mut key: [u8; 32] = opt_result!(key.try_into(), "Invalid envelop: {}");
-    let mut aes256_gcm = Aes256GcmStreamDecryptor::new(key, nonce);
-    let mut b1 = aes256_gcm.update(message);
-    let b2 = opt_result!(aes256_gcm.finalize(), "Invalid envelop: {}");
-    b1.extend_from_slice(&b2);
-    key.zeroize();
-    Ok(b1)
+    Ok(opt_result!(aes_gcm_stream::aes_256_gcm_decrypt(key, nonce, message), "Bad key or cipher text: {}"))
 }
 
 pub fn aes_gcm_encrypt_with_salt(key: &[u8], nonce: &[u8], salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
@@ -26,14 +18,7 @@ pub fn aes_gcm_encrypt_with_salt(key: &[u8], nonce: &[u8], salt: &[u8], message:
 }
 
 pub fn aes_gcm_encrypt(key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    let mut key: [u8; 32] = opt_result!(key.try_into(), "Invalid envelop: {}");
-    let mut aes256_gcm = Aes256GcmStreamEncryptor::new(key, nonce);
-    let mut b1 = aes256_gcm.update(message);
-    let (b2, tag) = aes256_gcm.finalize();
-    b1.extend_from_slice(&b2);
-    b1.extend_from_slice(&tag);
-    key.zeroize();
-    Ok(b1)
+    Ok(opt_result!(aes_gcm_stream::aes_256_gcm_encrypt(key, nonce, message), "Bad key length: {}"))
 }
 
 fn build_salted_nonce(nonce: &[u8], salt: &[u8]) -> Vec<u8> {
@@ -45,6 +30,7 @@ fn build_salted_nonce(nonce: &[u8], salt: &[u8]) -> Vec<u8> {
 
 #[test]
 fn test_aes_gcm_01() {
+    use aes_gcm_stream::Aes256GcmStreamEncryptor;
     let data_key = hex::decode("0001020304050607080910111213141516171819202122232425262728293031").unwrap();
     let nonce = hex::decode("000102030405060708091011").unwrap();
 
@@ -75,6 +61,7 @@ fn test_aes_gcm_01() {
 
 #[test]
 fn test_aes_gcm_02() {
+    use aes_gcm_stream::Aes256GcmStreamDecryptor;
     let data_key = hex::decode("aa01020304050607080910111213141516171819202122232425262728293031").unwrap();
     let nonce = hex::decode("aa0102030405060708091011").unwrap();
 

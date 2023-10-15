@@ -92,7 +92,7 @@ impl TinyEncryptConfig {
 
     pub fn find_by_kid_or_type(&self, k_filter: &str) -> Vec<&TinyEncryptConfigEnvelop> {
         self.find_by_kid_or_filter(k_filter, |e| {
-            k_filter == &format!("type:{}", &e.r#type.get_name())
+            k_filter == "ALL" || k_filter == format!("type:{}", &e.r#type.get_name())
         })
     }
 
@@ -121,7 +121,7 @@ impl TinyEncryptConfig {
             }
         }
         if let Some(key_filter) = key_filter {
-            key_filter.split(",").for_each(|k| {
+            key_filter.split(',').for_each(|k| {
                 let k = k.trim();
                 if !k.is_empty() {
                     key_ids.push(k.to_string());
@@ -137,9 +137,7 @@ impl TinyEncryptConfig {
             }
         }
 
-        let mut envelops: Vec<_> = matched_envelops_map.values()
-            .copied()
-            .collect();
+        let mut envelops: Vec<_> = matched_envelops_map.values().copied().collect();
         if envelops.is_empty() {
             return simple_error!("Profile or key filter cannot find valid envelopes");
         }

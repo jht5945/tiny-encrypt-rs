@@ -7,7 +7,7 @@ use clap::Args;
 use openpgp_card::crypto_data::Cryptogram;
 use rust_util::{
     debugging, failure, iff, information, opt_result, simple_error, success,
-    util_msg, warning, XResult,
+    warning, XResult,
 };
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
@@ -25,6 +25,7 @@ use crate::consts::{
 };
 use crate::crypto_aes::{aes_gcm_decrypt, try_aes_gcm_decrypt_with_salt};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
+use crate::util_process::Progress;
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -115,14 +116,13 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     } else {
         let compressed_desc = iff!(meta.compress, " [compressed]", "");
         let start = Instant::now();
-        util_msg::print_lastline(
-            &format!("Decrypting file: {}{} ...", path_display, compressed_desc)
-        );
 
         let mut file_out = File::create(path_out)?;
-        let _ = decrypt_file(&mut file_in, &mut file_out, &key, &nonce, meta.compress)?;
+        let _ = decrypt_file(
+            &mut file_in, meta.file_length, &mut file_out,
+            &key, &nonce, meta.compress,
+        )?;
         drop(file_out);
-        util_msg::clear_lastline();
 
         util_file::update_out_file_time(enc_meta, path_out);
         let encrypt_duration = start.elapsed();
@@ -136,10 +136,11 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     Ok(meta.file_length)
 }
 
-fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool) -> XResult<usize> {
-    let mut total_len = 0;
+fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool) -> XResult<u64> {
+    let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
     let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
+    let progress = Progress::new(file_len);
     let mut decryptor = aes_gcm_stream::Aes256GcmStreamDecryptor::new(key, nonce);
     let mut gz_decoder = GzStreamDecoder::new();
     loop {
@@ -156,9 +157,10 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
             };
             opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
             debugging!("Decrypt finished, total bytes: {}", total_len);
+            progress.finish();
             break;
         } else {
-            total_len += len;
+            total_len += len as u64;
             let decrypted = decryptor.update(&buffer[0..len]);
             let decrypted = if compress {
                 opt_result!(gz_decoder.update(&decrypted), "Decompress file failed: {}")
@@ -166,6 +168,7 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
                 decrypted
             };
             opt_result!(file_out.write_all(&decrypted), "Write file failed: {}");
+            progress.position(total_len);
         }
     }
     let mut key = key;
@@ -310,13 +313,13 @@ fn select_envelop<'a>(meta: &'a TinyEncryptMeta, config: &Option<TinyEncryptConf
     success!("Found {} envelops:", envelops.len());
     if envelops.len() == 1 {
         let selected_envelop = &envelops[0];
-        success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, &config));
+        success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, config));
         util::read_line("Press enter to continue: ");
         return Ok(selected_envelop);
     }
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {
-        println!("#{} {}", i + 1, util_envelop::format_envelop(envelop, &config));
+        println!("#{} {}", i + 1, util_envelop::format_envelop(envelop, config));
     });
 
     let envelop_number = util::read_number("Please select an envelop:", 1, envelops.len());

@@ -34,9 +34,13 @@ impl PartialOrd for ConfigProfile {
 }
 
 #[derive(Debug, Args)]
-pub struct CmdConfig {}
+pub struct CmdConfig {
+    /// Show KID
+    #[arg(long)]
+    pub show_kid: bool,
+}
 
-pub fn config(_cmd_version: CmdConfig) -> XResult<()> {
+pub fn config(cmd_version: CmdConfig) -> XResult<()> {
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE)?;
 
     let mut reverse_map = HashMap::new();
@@ -64,10 +68,17 @@ pub fn config(_cmd_version: CmdConfig) -> XResult<()> {
                     ks.push(format!("[ERROR] Key not found: {}", kid));
                 }
                 Some(envelop) => {
+                    let kid = if cmd_version.show_kid {
+                        format!("Kid: {}", envelop.kid)
+                    } else {
+                        envelop.sid.as_ref()
+                            .map(|sid| format!("Sid: {}", sid))
+                            .unwrap_or_else(|| format!("Kid: {}", envelop.kid))
+                    };
                     let desc = envelop.desc.as_ref()
                         .map(|desc| format!(", Desc: {}", desc))
                         .unwrap_or_else(|| "".to_string());
-                    ks.push(format!("{}{}", envelop.kid, desc));
+                    ks.push(format!("{}, {}{}", envelop.r#type.get_name(), kid, desc));
                 }
             }
         }

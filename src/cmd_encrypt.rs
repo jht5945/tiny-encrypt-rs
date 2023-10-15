@@ -7,7 +7,7 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_msg, XResult};
+use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, XResult};
 use rust_util::util_time::UnixEpochTime;
 use zeroize::Zeroize;
 
@@ -18,6 +18,7 @@ use crate::consts::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25
 use crate::crypto_aes::{aes_gcm_encrypt, aes_gcm_encrypt_with_salt};
 use crate::crypto_rsa::parse_spki;
 use crate::spec::{EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
+use crate::util_process::Progress;
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
@@ -33,7 +34,7 @@ pub struct CmdEncrypt {
     /// Encryption profile (use default when --key-filter is assigned)
     #[arg(long, short = 'p')]
     pub profile: Option<String>,
-    /// Encryption key filter (key_id or type:TYPE(e.g. ecdh, pgp, ecdh-p384, pgp-ed25519), multiple joined by ',')
+    /// Encryption key filter (key_id or type:TYPE(e.g. ecdh, pgp, ecdh-p384, pgp-ed25519), multiple joined by ',', ALL for all)
     #[arg(long, short = 'k')]
     pub key_filter: Option<String>,
     /// Compress before encrypt
@@ -153,11 +154,10 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
 
     let compress_desc = iff!(cmd_encrypt.compress, " [with compress]", "");
     let start = Instant::now();
-    util_msg::print_lastline(
-        &format!("Encrypting file: {}{} ...", path_display, compress_desc)
-    );
-    encrypt_file(&mut file_in, &mut file_out, &key, &nonce, cmd_encrypt.compress, &cmd_encrypt.compress_level)?;
-    util_msg::clear_lastline();
+    encrypt_file(
+        &mut file_in, file_metadata.len(), &mut file_out,
+        &key, &nonce, cmd_encrypt.compress, &cmd_encrypt.compress_level,
+    )?;
     let encrypt_duration = start.elapsed();
     debugging!("Inner encrypt file{}: {} elapsed: {} ms", compress_desc, path_display, encrypt_duration.as_millis());
 
@@ -194,8 +194,8 @@ fn process_compatible_with_1_0(cmd_encrypt: &CmdEncrypt, mut encrypt_meta: TinyE
     Ok(encrypt_meta)
 }
 
-fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<usize> {
-    let mut total_len = 0;
+fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<u64> {
+    let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
     let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
     let mut gz_encoder = match compress_level {
@@ -207,6 +207,7 @@ fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
             GzStreamEncoder::new(Compression::new(*compress_level))
         }
     };
+    let progress = Progress::new(file_len);
     let mut encryptor = aes_gcm_stream::Aes256GcmStreamEncryptor::new(key, nonce);
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
@@ -225,9 +226,10 @@ fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
             };
             opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
             debugging!("Encrypt finished, total bytes: {}", total_len);
+            progress.finish();
             break;
         } else {
-            total_len += len;
+            total_len += len as u64;
             let encrypted = if compress {
                 let compressed = opt_result!(gz_encoder.update(&buffer[0..len]), "Decompress file failed: {}");
                 encryptor.update(&compressed)
@@ -235,6 +237,7 @@ fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
                 encryptor.update(&buffer[0..len])
             };
             opt_result!(file_out.write_all(&encrypted), "Write file failed: {}");
+            progress.position(total_len);
         }
     }
     let mut key = key;
