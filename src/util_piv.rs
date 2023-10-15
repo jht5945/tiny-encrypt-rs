@@ -1,5 +1,34 @@
-use rust_util::{simple_error, XResult};
+use std::io;
+use std::io::Write;
+
+use rust_util::{information, simple_error, XResult};
 use yubikey::piv::{RetiredSlotId, SlotId};
+
+use crate::config::TinyEncryptConfig;
+
+pub fn read_piv_slot(config: &Option<TinyEncryptConfig>, kid: &str, slot: &Option<String>) -> XResult<String> {
+    match slot {
+        Some(slot) => Ok(slot.to_string()),
+        None => {
+            if let Some(config) = config {
+                if let Some(first_arg) = config.find_first_arg_by_kid(kid) {
+                    information!("Found kid: {}'s slot: {}", kid, first_arg);
+                    return Ok(first_arg.to_string());
+                }
+            }
+            print!("Input slot(eg 82, 83 ...): ");
+            io::stdout().flush().ok();
+            let mut buff = String::new();
+            let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");
+            if buff.trim().is_empty() {
+                simple_error!("Slot is required, and not inputted")
+            } else {
+                Ok(buff.trim().to_string())
+            }
+        }
+    }
+}
+
 
 pub fn get_slot_id(slot: &str) -> XResult<SlotId> {
     let slot_lower = slot.to_lowercase();

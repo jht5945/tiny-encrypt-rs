@@ -4,12 +4,13 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clap::Args;
-use rust_util::{util_time, iff, opt_result, simple_error, success, warning, XResult};
+use rust_util::{opt_result, simple_error, success, util_time, warning, XResult};
 use rust_util::util_time::UnixEpochTime;
 use simpledateformat::format_human2;
 
-use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM, TINY_ENC_FILE_EXT};
-use crate::file;
+use crate::{util_enc_file, util_envelop};
+use crate::config::TinyEncryptConfig;
+use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 
 #[derive(Debug, Args)]
 pub struct CmdInfo {
@@ -37,9 +38,10 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
         return simple_error!("Not a Tiny Encrypt file: {}", path_display);
     }
 
+    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
     let meta = opt_result!(
-        file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display
+        util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display
     );
 
     if cmd_info.raw_meta {
@@ -71,13 +73,9 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
 
     if let Some(envelops) = meta.envelops.as_ref() {
         envelops.iter().enumerate().for_each(|(i, envelop)| {
-            let kid = iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid));
-            let desc = envelop.desc.as_ref().map(|desc| format!(", Desc: {}", desc)).unwrap_or_else(|| "".to_string());
-            infos.push(format!("{}: {}{}{}",
+            infos.push(format!("{}: {}",
                                header(&format!("Envelop #{}", i + 1)),
-                               envelop.r#type.get_upper_name(),
-                               kid,
-                               desc
+                               util_envelop::format_envelop(envelop, &config)
             ));
         })
     }

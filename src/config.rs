@@ -41,6 +41,7 @@ pub struct TinyEncryptConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TinyEncryptConfigEnvelop {
     pub r#type: TinyEncryptEnvelopType,
+    pub sid: Option<String>,
     pub kid: String,
     pub desc: Option<String>,
     pub args: Option<Vec<String>>,
@@ -81,32 +82,66 @@ impl TinyEncryptConfig {
     }
 
     pub fn find_by_kid(&self, kid: &str) -> Option<&TinyEncryptConfigEnvelop> {
-        self.envelops.iter().find(|e| e.kid == kid)
+        let config_envelops = self.find_by_kid_or_filter(kid, |_| false);
+        if config_envelops.is_empty() {
+            None
+        } else {
+            Some(config_envelops[0])
+        }
     }
 
-    pub fn find_envelops(&self, profile: &Option<String>) -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
-        let profile = profile.as_ref().map(String::as_str).unwrap_or("default");
-        debugging!("Profile: {}", profile);
-        let mut matched_envelops_map = HashMap::new();
-        if let Some(key_ids) = self.profiles.get(profile) {
-            if key_ids.is_empty() {
-                return simple_error!("Profile: {} contains no valid envelopes", profile);
+    pub fn find_by_kid_or_type(&self, k_filter: &str) -> Vec<&TinyEncryptConfigEnvelop> {
+        self.find_by_kid_or_filter(k_filter, |e| {
+            k_filter == &format!("type:{}", &e.r#type.get_name())
+        })
+    }
+
+    pub fn find_by_kid_or_filter<F>(&self, kid: &str, f: F) -> Vec<&TinyEncryptConfigEnvelop>
+        where F: Fn(&TinyEncryptConfigEnvelop) -> bool {
+        self.envelops.iter().filter(|e| {
+            if e.kid == kid {
+                return true;
             }
-            for key_id in key_ids {
-                self.envelops.iter().for_each(|envelop| {
-                    let is_matched = (&envelop.kid == key_id)
-                        || key_id == &format!("type:{}", &envelop.r#type.get_name());
-                    if is_matched {
-                        matched_envelops_map.insert(&envelop.kid, envelop);
-                    }
-                });
+            if let Some(sid) = &e.sid {
+                return sid == kid;
+            }
+            f(e)
+        }).collect()
+    }
+
+    pub fn find_envelops(&self, profile: &Option<String>, key_filter: &Option<String>) -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
+        debugging!("Profile: {:?}", profile);
+        debugging!("Key filter: {:?}", key_filter);
+        let mut matched_envelops_map = HashMap::new();
+        let mut key_ids = vec![];
+        if key_filter.is_none() || profile.is_some() {
+            let profile = profile.as_ref().map(String::as_str).unwrap_or("default");
+            if let Some(kids) = self.profiles.get(profile) {
+                kids.iter().for_each(|k| key_ids.push(k.to_string()));
             }
         }
+        if let Some(key_filter) = key_filter {
+            key_filter.split(",").for_each(|k| {
+                let k = k.trim();
+                if !k.is_empty() {
+                    key_ids.push(k.to_string());
+                }
+            });
+        }
+        if key_ids.is_empty() {
+            return simple_error!("Profile or key filter cannot find valid envelopes");
+        }
+        for key_id in &key_ids {
+            for envelop in self.find_by_kid_or_type(key_id) {
+                matched_envelops_map.insert(&envelop.kid, envelop);
+            }
+        }
+
         let mut envelops: Vec<_> = matched_envelops_map.values()
             .copied()
             .collect();
         if envelops.is_empty() {
-            return simple_error!("Profile: {} has no valid envelopes found", profile);
+            return simple_error!("Profile or key filter cannot find valid envelopes");
         }
         envelops.sort_by(|e1, e2| {
             if e1.r#type < e2.r#type { return Ordering::Greater; }

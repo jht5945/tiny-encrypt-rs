@@ -1,16 +1,13 @@
-use std::{fs, io};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime};
 
 use clap::Args;
-use fs_set_times::SystemTimeSpec;
-use openpgp_card::{OpenPgp, OpenPgpTransaction};
 use openpgp_card::crypto_data::Cryptogram;
 use rust_util::{
     debugging, failure, iff, information, opt_result, simple_error, success,
-    util_msg, util_term, warning, XResult,
+    util_msg, warning, XResult,
 };
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
@@ -19,10 +16,13 @@ use yubikey::piv::{AlgorithmId, decrypt_data};
 use yubikey::YubiKey;
 use zeroize::Zeroize;
 
-use crate::{card, file, util, util_piv};
+use crate::{util, util_enc_file, util_envelop, util_file, util_pgp, util_piv};
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
-use crate::consts::{DATE_TIME_FORMAT, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
+use crate::consts::{
+    DATE_TIME_FORMAT, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
+    SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
+};
 use crate::crypto_aes::{aes_gcm_decrypt, try_aes_gcm_decrypt_with_salt};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
 use crate::wrap_key::WrapKey;
@@ -93,13 +93,13 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     util::require_tiny_enc_file_and_exists(path)?;
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
-    let meta = opt_result!(file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
+    let meta = opt_result!(util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
     debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
 
     let path_out = &path_display[0..path_display.len() - TINY_ENC_FILE_EXT.len()];
     util::require_file_not_exists(path_out)?;
 
-    let selected_envelop = select_envelop(&meta)?;
+    let selected_envelop = select_envelop(&meta, config)?;
 
     let key = try_decrypt_key(config, selected_envelop, pin, slot)?;
     let nonce = opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}");
@@ -113,9 +113,10 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     if cmd_decrypt.skip_decrypt_file {
         information!("Decrypt file is skipped.");
     } else {
+        let compressed_desc = iff!(meta.compress, " [compressed]", "");
         let start = Instant::now();
         util_msg::print_lastline(
-            &format!("Decrypting file: {}{} ...", path_display, iff!(meta.compress, " [compressed]", ""))
+            &format!("Decrypting file: {}{} ...", path_display, compressed_desc)
         );
 
         let mut file_out = File::create(path_out)?;
@@ -123,20 +124,15 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
         drop(file_out);
         util_msg::clear_lastline();
 
-        update_out_file_time(enc_meta, path_out);
+        util_file::update_out_file_time(enc_meta, path_out);
         let encrypt_duration = start.elapsed();
-        debugging!("Inner decrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
+        debugging!("Inner decrypt file{}: {} elapsed: {} ms", compressed_desc, path_display, encrypt_duration.as_millis());
     }
 
     util::zeroize(key);
     util::zeroize(nonce);
     drop(file_in);
-    if cmd_decrypt.remove_file {
-        match fs::remove_file(path) {
-            Err(e) => warning!("Remove file: {} failed: {}", path_display, e),
-            Ok(_) => information!("Remove file: {} succeed", path_display),
-        }
-    }
+    if cmd_decrypt.remove_file { util::remove_file_with_msg(path); }
     Ok(meta.file_length)
 }
 
@@ -177,29 +173,11 @@ fn decrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8
     Ok(total_len)
 }
 
-fn update_out_file_time(enc_meta: Option<EncEncryptedMeta>, path_out: &str) {
-    if let Some(enc_meta) = &enc_meta {
-        let create_time = enc_meta.c_time.map(|t| SystemTime::from_millis(t));
-        let modify_time = enc_meta.m_time.map(|t| SystemTime::from_millis(t));
-        if create_time.is_some() || modify_time.is_some() {
-            let set_times_result = fs_set_times::set_times(
-                path_out,
-                create_time.map(|t| SystemTimeSpec::Absolute(t)),
-                modify_time.map(|t| SystemTimeSpec::Absolute(t)),
-            );
-            match set_times_result {
-                Ok(_) => information!("Set file time succeed."),
-                Err(e) => warning!("Set file time failed: {}", e),
-            }
-        }
-    }
-}
-
 fn parse_encrypted_comment(meta: &TinyEncryptMeta, key: &[u8], nonce: &[u8]) -> XResult<()> {
     if let Some(encrypted_comment) = &meta.encrypted_comment {
         match util::decode_base64(encrypted_comment) {
             Err(e) => warning!("Decode encrypted comment failed: {}", e),
-            Ok(ec_bytes) => match try_aes_gcm_decrypt_with_salt(&key, &nonce, SALT_COMMENT, &ec_bytes) {
+            Ok(ec_bytes) => match try_aes_gcm_decrypt_with_salt(key, nonce, SALT_COMMENT, &ec_bytes) {
                 Err(e) => warning!("Decrypt encrypted comment failed: {}", e),
                 Ok(decrypted_comment_bytes) => match String::from_utf8(decrypted_comment_bytes.clone()) {
                     Err(_) => success!("Encrypted message hex: {}", hex::encode(&decrypted_comment_bytes)),
@@ -218,7 +196,7 @@ fn parse_encrypted_meta(meta: &TinyEncryptMeta, key: &[u8], nonce: &[u8]) -> XRe
             let enc_encrypted_meta_bytes = opt_result!(
             util::decode_base64(enc_encrypted_meta), "Decode enc-encrypted-meta failed: {}");
             let enc_meta = opt_result!(
-            EncEncryptedMeta::unseal(&key, &nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
+            EncEncryptedMeta::unseal(key, nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
             if let Some(filename) = &enc_meta.filename {
                 information!("Source filename: {}", filename);
             }
@@ -243,7 +221,7 @@ fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
         TinyEncryptEnvelopType::Ecdh => try_decrypt_key_ecdh(config, envelop, pin, ENC_AES256_GCM_P256, slot),
         TinyEncryptEnvelopType::EcdhP384 => try_decrypt_key_ecdh(config, envelop, pin, ENC_AES256_GCM_P384, slot),
-        unknown_type => simple_error!("Unknown or not supported type: {}", unknown_type.get_name()),
+        unknown_type => simple_error!("Unknown or unsupported type: {}", unknown_type.get_name()),
     }
 }
 
@@ -254,14 +232,14 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
                         slot: &Option<String>) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
     if wrap_key.header.enc.as_str() != expected_enc_type {
-        return simple_error!("Unsupported header requires: {}, actual: {}", expected_enc_type, &wrap_key.header.enc);
+        return simple_error!("Unsupported header, requires: {} actual: {}", expected_enc_type, &wrap_key.header.enc);
     }
     let e_pub_key = &wrap_key.header.e_pub_key;
     let e_pub_key_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
     let (_, subject_public_key_info) = opt_result!(SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
 
-    let slot = read_slot(config, &envelop.kid, slot)?;
-    let pin = read_pin(pin);
+    let slot = util_piv::read_piv_slot(config, &envelop.kid, slot)?;
+    let pin = util::read_pin(pin);
     let epk_bytes = subject_public_key_info.subject_public_key.as_ref();
 
     let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
@@ -286,15 +264,15 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
 fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
     if wrap_key.header.enc.as_str() != ENC_AES256_GCM_X25519 {
-        return simple_error!("Unsupported header requires: {}, actual: {}", ENC_AES256_GCM_X25519, &wrap_key.header.enc);
+        return simple_error!("Unsupported header, requires: {} actual: {}", ENC_AES256_GCM_X25519, &wrap_key.header.enc);
     }
     let e_pub_key = &wrap_key.header.e_pub_key;
     let epk_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
 
-    let mut pgp = get_openpgp()?;
+    let mut pgp = util_pgp::get_openpgp()?;
     let mut trans = opt_result!(pgp.transaction(), "Open card failed: {}");
 
-    read_and_verify_openpgp_pin(&mut trans, pin)?;
+    util_pgp::read_and_verify_openpgp_pin(&mut trans, pin)?;
 
     let shared_secret = trans.decipher(Cryptogram::ECDH(&epk_bytes))?;
 
@@ -306,10 +284,10 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
 }
 
 fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
-    let mut pgp = get_openpgp()?;
+    let mut pgp = util_pgp::get_openpgp()?;
     let mut trans = opt_result!(pgp.transaction(), "Open card failed: {}");
 
-    read_and_verify_openpgp_pin(&mut trans, pin)?;
+    util_pgp::read_and_verify_openpgp_pin(&mut trans, pin)?;
 
     let pgp_envelop = &envelop.encrypted_key;
     debugging!("PGP envelop: {}", &pgp_envelop);
@@ -319,62 +297,7 @@ fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XR
     Ok(key)
 }
 
-fn read_and_verify_openpgp_pin(trans: &mut OpenPgpTransaction, pin: &Option<String>) -> XResult<()> {
-    let pin = read_pin(pin);
-    if let Err(e) = trans.verify_pw1_user(pin.as_ref()) {
-        failure!("Verify user pin failed: {}", e);
-        return simple_error!("User pin verify failed: {}", e);
-    }
-    success!("User pin verify success!");
-    Ok(())
-}
-
-fn get_openpgp() -> XResult<OpenPgp> {
-    let card = match card::get_card() {
-        Err(e) => {
-            failure!("Get PGP card failed: {}", e);
-            return simple_error!("Get card failed: {}", e);
-        }
-        Ok(card) => card
-    };
-    Ok(OpenPgp::new(card))
-}
-
-fn read_slot(config: &Option<TinyEncryptConfig>, kid: &str, slot: &Option<String>) -> XResult<String> {
-    match slot {
-        Some(slot) => Ok(slot.to_string()),
-        None => {
-            if let Some(config) = config {
-                if let Some(first_arg) = config.find_first_arg_by_kid(kid) {
-                    information!("Found kid: {}'s slot: {}", kid, first_arg);
-                    return Ok(first_arg.to_string());
-                }
-            }
-            print!("Input slot(eg 82, 83 ...): ");
-            io::stdout().flush().ok();
-            let mut buff = String::new();
-            let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");
-            if buff.trim().is_empty() {
-                simple_error!("Slot is required, and not inputted")
-            } else {
-                Ok(buff.trim().to_string())
-            }
-        }
-    }
-}
-
-fn read_pin(pin: &Option<String>) -> String {
-    match pin {
-        Some(pin) => pin.to_string(),
-        None => if util_term::read_yes_no("Use default PIN 123456, please confirm") {
-            "123456".into()
-        } else {
-            rpassword::prompt_password("Please input PIN: ").expect("Read PIN failed")
-        }
-    }
-}
-
-fn select_envelop(meta: &TinyEncryptMeta) -> XResult<&TinyEncryptEnvelop> {
+fn select_envelop<'a>(meta: &'a TinyEncryptMeta, config: &Option<TinyEncryptConfig>) -> XResult<&'a TinyEncryptEnvelop> {
     let envelops = match &meta.envelops {
         None => return simple_error!("No envelops found"),
         Some(envelops) => if envelops.is_empty() {
@@ -387,21 +310,13 @@ fn select_envelop(meta: &TinyEncryptMeta) -> XResult<&TinyEncryptEnvelop> {
     success!("Found {} envelops:", envelops.len());
     if envelops.len() == 1 {
         let selected_envelop = &envelops[0];
-        success!("Auto selected envelop: #{} {}", 1, selected_envelop.r#type.get_upper_name());
+        success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, &config));
         util::read_line("Press enter to continue: ");
         return Ok(selected_envelop);
     }
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {
-        let kid = iff!(envelop.kid.is_empty(), "".into(), format!(", Kid: {}", envelop.kid));
-        let desc = envelop.desc.as_ref()
-            .map(|desc| format!(", Desc: {}", desc))
-            .unwrap_or_else(|| "".to_string());
-        println!("#{} {}{}{}", i + 1,
-                 envelop.r#type.get_upper_name(),
-                 kid,
-                 desc,
-        );
+        println!("#{} {}", i + 1, util_envelop::format_envelop(envelop, &config));
     });
 
     let envelop_number = util::read_number("Please select an envelop:", 1, envelops.len());

@@ -1,14 +1,32 @@
 use std::{fs, io};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose;
 use rand::random;
-use rust_util::{simple_error, warning, XResult};
+use rust_util::{information, simple_error, util_term, warning, XResult};
 use zeroize::Zeroize;
 
 use crate::consts::TINY_ENC_FILE_EXT;
+
+pub fn read_pin(pin: &Option<String>) -> String {
+    match pin {
+        Some(pin) => pin.to_string(),
+        None => if util_term::read_yes_no("Use default PIN 123456, please confirm") {
+            "123456".into()
+        } else {
+            rpassword::prompt_password("Please input PIN: ").expect("Read PIN failed")
+        }
+    }
+}
+
+pub fn remove_file_with_msg(path: &PathBuf) {
+    match fs::remove_file(path) {
+        Err(e) => warning!("Remove file: {} failed: {}", path.display(), e),
+        Ok(_) => information!("Remove file: {} succeed", path.display()),
+    }
+}
 
 pub fn get_file_name(path: &Path) -> String {
     let path_display = format!("{}", path.display());

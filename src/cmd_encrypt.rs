@@ -7,11 +7,11 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, information, opt_result, simple_error, success, util_msg, warning, XResult};
+use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_msg, XResult};
 use rust_util::util_time::UnixEpochTime;
 use zeroize::Zeroize;
 
-use crate::{file, util, util_ecdh, util_p384, util_x25519};
+use crate::{util, util_ecdh, util_enc_file, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::consts::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
@@ -24,22 +24,25 @@ use crate::wrap_key::{WrapKey, WrapKeyHeader};
 pub struct CmdEncrypt {
     /// Files need to be decrypted
     pub paths: Vec<PathBuf>,
-    /// Comment
+    /// Plaintext comment
     #[arg(long, short = 'c')]
     pub comment: Option<String>,
     /// Encrypted comment
     #[arg(long, short = 'C')]
     pub encrypted_comment: Option<String>,
-    /// Encryption profile
+    /// Encryption profile (use default when --key-filter is assigned)
     #[arg(long, short = 'p')]
     pub profile: Option<String>,
+    /// Encryption key filter (key_id or type:TYPE(e.g. ecdh, pgp, ecdh-p384, pgp-ed25519), multiple joined by ',')
+    #[arg(long, short = 'k')]
+    pub key_filter: Option<String>,
     /// Compress before encrypt
     #[arg(long, short = 'x')]
     pub compress: bool,
     /// Compress level (from 0[none], 1[fast] .. 6[default] .. to 9[best])
     #[arg(long, short = 'L')]
     pub compress_level: Option<u32>,
-    /// Compatible with 1.0
+    /// Compatible with 1.0 (requires assign --disable-compress-meta)
     #[arg(long, short = '1')]
     pub compatible_with_1_0: bool,
     /// Remove source file
@@ -53,7 +56,7 @@ pub struct CmdEncrypt {
 pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE)?;
     debugging!("Found tiny encrypt config: {:?}", config);
-    let envelops = config.find_envelops(&cmd_encrypt.profile)?;
+    let envelops = config.find_envelops(&cmd_encrypt.profile, &cmd_encrypt.key_filter)?;
     if envelops.is_empty() { return simple_error!("Cannot find any valid envelops"); }
     debugging!("Found envelops: {:?}", envelops);
     let envelop_tkids: Vec<_> = envelops.iter()
@@ -125,8 +128,8 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
     let enc_encrypted_meta = EncEncryptedMeta {
         filename: Some(util::get_file_name(path)),
-        c_time: file_metadata.created().ok().map(|t| t.to_millis()).flatten(),
-        m_time: file_metadata.modified().ok().map(|t| t.to_millis()).flatten(),
+        c_time: file_metadata.created().ok().and_then(|t| t.to_millis()),
+        m_time: file_metadata.modified().ok().and_then(|t| t.to_millis()),
     };
     let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(&key, &nonce), "Seal enc-encrypted-meta failed: {}");
 
@@ -141,54 +144,55 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     debugging!("Encrypted meta: {:?}", encrypt_meta);
 
     if cmd_encrypt.compatible_with_1_0 {
-        if !cmd_encrypt.disable_compress_meta {
-            return simple_error!("Compatible with 1.0 mode must turns --disable-compress-meta on.");
-        }
-
-        if let Some(envelops) = encrypt_meta.envelops {
-            let mut filter_envelops = vec![];
-            for envelop in envelops {
-                if (envelop.r#type == TinyEncryptEnvelopType::Pgp) && encrypt_meta.pgp_envelop.is_none() {
-                    encrypt_meta.pgp_fingerprint = Some(format!("KID:{}", envelop.kid));
-                    encrypt_meta.pgp_envelop = Some(envelop.encrypted_key.clone());
-                } else if (envelop.r#type == TinyEncryptEnvelopType::Ecdh) && encrypt_meta.ecdh_envelop.is_none() {
-                    encrypt_meta.ecdh_point = Some(format!("KID:{}", envelop.kid));
-                    encrypt_meta.ecdh_envelop = Some(envelop.encrypted_key.clone());
-                } else {
-                    filter_envelops.push(envelop);
-                }
-            }
-            encrypt_meta.envelops = if filter_envelops.is_empty() { None } else { Some(filter_envelops) };
-            if encrypt_meta.envelops.is_none() {
-                encrypt_meta.version = TINY_ENCRYPT_VERSION_10.to_string();
-            }
-        }
+        encrypt_meta = process_compatible_with_1_0(cmd_encrypt, encrypt_meta)?;
     }
 
     let mut file_out = File::create(&path_out)?;
     let compress_meta = !cmd_encrypt.disable_compress_meta;
-    let _ = file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
+    let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
 
+    let compress_desc = iff!(cmd_encrypt.compress, " [with compress]", "");
     let start = Instant::now();
-    util_msg::print_lastline(&format!("Encrypting file: {} ...", path_display));
+    util_msg::print_lastline(
+        &format!("Encrypting file: {}{} ...", path_display, compress_desc)
+    );
     encrypt_file(&mut file_in, &mut file_out, &key, &nonce, cmd_encrypt.compress, &cmd_encrypt.compress_level)?;
     util_msg::clear_lastline();
     let encrypt_duration = start.elapsed();
-    debugging!("Encrypt file: {} elapsed: {} ms", path_display, encrypt_duration.as_millis());
+    debugging!("Inner encrypt file{}: {} elapsed: {} ms", compress_desc, path_display, encrypt_duration.as_millis());
 
     util::zeroize(key);
     util::zeroize(nonce);
     drop(file_in);
     drop(file_out);
-    if cmd_encrypt.remove_file {
-        match fs::remove_file(path) {
-            Err(e) => warning!("Remove file: {} failed: {}", path_display, e),
-            Ok(_) => information!("Remove file: {} succeed", path_display),
-        }
-    }
+    if cmd_encrypt.remove_file { util::remove_file_with_msg(path); }
     Ok(file_metadata.len())
 }
 
+fn process_compatible_with_1_0(cmd_encrypt: &CmdEncrypt, mut encrypt_meta: TinyEncryptMeta) -> XResult<TinyEncryptMeta> {
+    if !cmd_encrypt.disable_compress_meta {
+        return simple_error!("Compatible with 1.0 mode must turns --disable-compress-meta on.");
+    }
+    if let Some(envelops) = encrypt_meta.envelops {
+        let mut filter_envelops = vec![];
+        for envelop in envelops {
+            if (envelop.r#type == TinyEncryptEnvelopType::Pgp) && encrypt_meta.pgp_envelop.is_none() {
+                encrypt_meta.pgp_fingerprint = Some(format!("KID:{}", envelop.kid));
+                encrypt_meta.pgp_envelop = Some(envelop.encrypted_key.clone());
+            } else if (envelop.r#type == TinyEncryptEnvelopType::Ecdh) && encrypt_meta.ecdh_envelop.is_none() {
+                encrypt_meta.ecdh_point = Some(format!("KID:{}", envelop.kid));
+                encrypt_meta.ecdh_envelop = Some(envelop.encrypted_key.clone());
+            } else {
+                filter_envelops.push(envelop);
+            }
+        }
+        encrypt_meta.envelops = if filter_envelops.is_empty() { None } else { Some(filter_envelops) };
+        if encrypt_meta.envelops.is_none() {
+            encrypt_meta.version = TINY_ENCRYPT_VERSION_10.to_string();
+        }
+    }
+    Ok(encrypt_meta)
+}
 
 fn encrypt_file(file_in: &mut File, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<usize> {
     let mut total_len = 0;
@@ -305,7 +309,7 @@ fn encrypt_envelop_shared_secret(key: &[u8],
     Ok(TinyEncryptEnvelop {
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),
-        desc: envelop.desc.clone(),
+        desc: None, // envelop.desc.clone(),
         encrypted_key: encoded_wrap_key,
     })
 }
@@ -317,7 +321,7 @@ fn encrypt_envelop_pgp(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResul
     Ok(TinyEncryptEnvelop {
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),
-        desc: envelop.desc.clone(),
+        desc: None, // envelop.desc.clone(),
         encrypted_key: util::encode_base64(&encrypted_key),
     })
 }
