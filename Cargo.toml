@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "0.4.0"
+version = "0.4.3"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -21,9 +21,10 @@ openpgp-card-pcsc = "0.3"
 p256 = { version = "0.13", features = ["pem", "ecdh", "pkcs8"] }
 p384 = { version = "0.13", features = ["pem", "ecdh", "pkcs8"] }
 rand = "0.8"
-reqwest = { version = "0.11", features = ["blocking", "rustls", "rustls-tls"] }
+# reqwest = { version = "0.11", features = ["blocking", "rustls", "rustls-tls"] }
 rpassword = "7.2"
 rsa = { version = "0.9", features = ["pem"] }
+rust-crypto = "0.2.36"
 rust_util = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

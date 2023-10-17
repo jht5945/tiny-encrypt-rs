@@ -11,14 +11,20 @@ use rust_util::{debugging, failure, iff, information, opt_result, simple_error, 
 use rust_util::util_time::UnixEpochTime;
 use zeroize::Zeroize;
 
-use crate::{util, util_ecdh, util_enc_file, util_p384, util_x25519};
+use crate::{util, util_enc_file, util_p256, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
-use crate::consts::{ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
+use crate::consts::{
+    ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
+    SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
+};
 use crate::crypto_aes::{aes_gcm_encrypt, aes_gcm_encrypt_with_salt};
 use crate::crypto_rsa::parse_spki;
-use crate::spec::{EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util_process::Progress;
+use crate::spec::{
+    EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10,
+    TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta,
+};
+use crate::util_progress::Progress;
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
@@ -118,12 +124,12 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     util::require_file_not_exists(path_out.as_str())?;
 
     let (key, nonce) = util::make_key256_and_nonce();
-    let envelops = encrypt_envelops(&key, envelops)?;
+    let envelops = encrypt_envelops(&key.0, envelops)?;
 
     let encrypted_comment = match &cmd_encrypt.encrypted_comment {
         None => None,
         Some(encrypted_comment) => Some(util::encode_base64(
-            &aes_gcm_encrypt_with_salt(&key, &nonce, SALT_COMMENT, encrypted_comment.as_bytes())?))
+            &aes_gcm_encrypt_with_salt(&key.0, &nonce.0, SALT_COMMENT, encrypted_comment.as_bytes())?))
     };
 
     let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
@@ -132,7 +138,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         c_time: file_metadata.created().ok().and_then(|t| t.to_millis()),
         m_time: file_metadata.modified().ok().and_then(|t| t.to_millis()),
     };
-    let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(&key, &nonce), "Seal enc-encrypted-meta failed: {}");
+    let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(&key.0, &nonce.0), "Seal enc-encrypted-meta failed: {}");
 
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
@@ -141,7 +147,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         compress: cmd_encrypt.compress,
     };
 
-    let mut encrypt_meta = TinyEncryptMeta::new(&file_metadata, &enc_metadata, &nonce, envelops);
+    let mut encrypt_meta = TinyEncryptMeta::new(&file_metadata, &enc_metadata, &nonce.0, envelops);
     debugging!("Encrypted meta: {:?}", encrypt_meta);
 
     if cmd_encrypt.compatible_with_1_0 {
@@ -156,15 +162,12 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     let start = Instant::now();
     encrypt_file(
         &mut file_in, file_metadata.len(), &mut file_out,
-        &key, &nonce, cmd_encrypt.compress, &cmd_encrypt.compress_level,
+        &key.0, &nonce.0, cmd_encrypt.compress, &cmd_encrypt.compress_level,
     )?;
+    drop(file_out);
     let encrypt_duration = start.elapsed();
     debugging!("Inner encrypt file{}: {} elapsed: {} ms", compress_desc, path_display, encrypt_duration.as_millis());
 
-    util::zeroize(key);
-    util::zeroize(nonce);
-    drop(file_in);
-    drop(file_out);
     if cmd_encrypt.remove_file { util::remove_file_with_msg(path); }
     Ok(file_metadata.len())
 }
@@ -194,7 +197,8 @@ fn process_compatible_with_1_0(cmd_encrypt: &CmdEncrypt, mut encrypt_meta: TinyE
     Ok(encrypt_meta)
 }
 
-fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<u64> {
+fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File,
+                key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<u64> {
     let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
     let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
@@ -269,7 +273,7 @@ fn encrypt_envelops(key: &[u8], envelops: &[&TinyEncryptConfigEnvelop]) -> XResu
 
 fn encrypt_envelop_ecdh(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let public_key_point_hex = &envelop.public_part;
-    let (shared_secret, ephemeral_spki) = util_ecdh::compute_shared_secret(public_key_point_hex)?;
+    let (shared_secret, ephemeral_spki) = util_p256::compute_shared_secret(public_key_point_hex)?;
 
     encrypt_envelop_shared_secret(key, &shared_secret, &ephemeral_spki, ENC_AES256_GCM_P256, envelop)
 }
@@ -296,7 +300,7 @@ fn encrypt_envelop_shared_secret(key: &[u8],
     let shared_key = util::simple_kdf(shared_secret);
     let (_, nonce) = util::make_key256_and_nonce();
 
-    let encrypted_key = aes_gcm_encrypt(&shared_key, &nonce, key)?;
+    let encrypted_key = aes_gcm_encrypt(&shared_key, &nonce.0, key)?;
 
     let wrap_key = WrapKey {
         header: WrapKeyHeader {
@@ -304,7 +308,7 @@ fn encrypt_envelop_shared_secret(key: &[u8],
             enc: enc_type.to_string(),
             e_pub_key: util::encode_base64_url_no_pad(ephemeral_spki),
         },
-        nonce,
+        nonce: nonce.0.clone(),
         encrypted_data: encrypted_key,
     };
     let encoded_wrap_key = wrap_key.encode()?;

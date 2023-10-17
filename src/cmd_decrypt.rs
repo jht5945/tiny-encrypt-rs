@@ -25,7 +25,9 @@ use crate::consts::{
 };
 use crate::crypto_aes::{aes_gcm_decrypt, try_aes_gcm_decrypt_with_salt};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util_process::Progress;
+use crate::util::SecVec;
+use crate::util_digest::DigestWrite;
+use crate::util_progress::Progress;
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -44,6 +46,15 @@ pub struct CmdDecrypt {
     /// Skip decrypt file
     #[arg(long)]
     pub skip_decrypt_file: bool,
+    /// Direct print to the console, file must less than 10K
+    #[arg(long)]
+    pub direct_print: bool,
+    /// Digest file
+    #[arg(long)]
+    pub digest_file: bool,
+    /// Digest algorithm (sha1, sha256[default], sha384, sha512 ...)
+    #[arg(long)]
+    pub digest_algorithm: Option<String>,
 }
 
 pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
@@ -94,49 +105,85 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     util::require_tiny_enc_file_and_exists(path)?;
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
-    let meta = opt_result!(util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
+    let meta = opt_result!(
+        util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
     debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
 
+    let do_skip_file_out = cmd_decrypt.skip_decrypt_file || cmd_decrypt.direct_print || cmd_decrypt.digest_file;
     let path_out = &path_display[0..path_display.len() - TINY_ENC_FILE_EXT.len()];
-    util::require_file_not_exists(path_out)?;
+    if !do_skip_file_out { util::require_file_not_exists(path_out)?; }
+
+    let digest_algorithm = match &cmd_decrypt.digest_algorithm {
+        None => "sha256",
+        Some(algo) => algo.as_str(),
+    };
+    if cmd_decrypt.digest_file { DigestWrite::from_algo(digest_algorithm)?; } // QUICK CHECK
 
     let selected_envelop = select_envelop(&meta, config)?;
 
-    let key = try_decrypt_key(config, selected_envelop, pin, slot)?;
-    let nonce = opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}");
+    let key = SecVec(try_decrypt_key(config, selected_envelop, pin, slot)?);
+    let nonce = SecVec(opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}"));
 
-    // debugging!("Decrypt key: {}", hex::encode(&key));
-    debugging!("Decrypt nonce: {}", hex::encode(&nonce));
+    // debugging!("Decrypt key: {}", hex::encode(&key.0));
+    debugging!("Decrypt nonce: {}", hex::encode(&nonce.0));
 
-    let enc_meta = parse_encrypted_meta(&meta, &key, &nonce)?;
-    parse_encrypted_comment(&meta, &key, &nonce)?;
+    let enc_meta = parse_encrypted_meta(&meta, &key.0, &nonce.0)?;
+    parse_encrypted_comment(&meta, &key.0, &nonce.0)?;
 
     if cmd_decrypt.skip_decrypt_file {
         information!("Decrypt file is skipped.");
-    } else {
-        let compressed_desc = iff!(meta.compress, " [compressed]", "");
-        let start = Instant::now();
-
-        let mut file_out = File::create(path_out)?;
-        let _ = decrypt_file(
-            &mut file_in, meta.file_length, &mut file_out,
-            &key, &nonce, meta.compress,
-        )?;
-        drop(file_out);
-
-        util_file::update_out_file_time(enc_meta, path_out);
-        let encrypt_duration = start.elapsed();
-        debugging!("Inner decrypt file{}: {} elapsed: {} ms", compressed_desc, path_display, encrypt_duration.as_millis());
+        return Ok(0);
     }
 
-    util::zeroize(key);
-    util::zeroize(nonce);
-    drop(file_in);
-    if cmd_decrypt.remove_file { util::remove_file_with_msg(path); }
+    // Decrypt to output
+    if cmd_decrypt.direct_print {
+        if meta.file_length > 10 * 1024 {
+            warning!("File too large(more than 10K) cannot direct print on console.");
+            return Ok(0);
+        }
+
+        let mut output: Vec<u8> = Vec::with_capacity(10 * 1024);
+        let _ = decrypt_file(
+            &mut file_in, meta.file_length, &mut output, &key.0, &nonce.0, meta.compress,
+        )?;
+        match String::from_utf8(output) {
+            Err(_) => warning!("File is not UTF-8 content."),
+            Ok(output) => println!(">>>>> BEGIN CONTENT >>>>>\n{}\n<<<<< END CONTENT <<<<<", &output),
+        }
+        return Ok(meta.file_length);
+    }
+
+    // Digest file
+    if cmd_decrypt.digest_file {
+        let mut digest_write = DigestWrite::from_algo(digest_algorithm)?;
+        let _ = decrypt_file(
+            &mut file_in, meta.file_length, &mut digest_write, &key.0, &nonce.0, meta.compress,
+        )?;
+        let digest = digest_write.digest();
+        success!("File digest {}: {}", digest_algorithm.to_uppercase(), hex::encode(digest));
+        return Ok(meta.file_length);
+    }
+
+    // Decrypt to file
+    let compressed_desc = iff!(meta.compress, " [compressed]", "");
+    let start = Instant::now();
+
+    let mut file_out = File::create(path_out)?;
+    let _ = decrypt_file(
+        &mut file_in, meta.file_length, &mut file_out, &key.0, &nonce.0, meta.compress,
+    )?;
+    drop(file_out);
+    util_file::update_out_file_time(enc_meta, path_out);
+
+    let encrypt_duration = start.elapsed();
+    debugging!("Inner decrypt file{}: {} elapsed: {} ms", compressed_desc, path_display, encrypt_duration.as_millis());
+
+    if do_skip_file_out & &cmd_decrypt.remove_file { util::remove_file_with_msg(path); }
     Ok(meta.file_length)
 }
 
-fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File, key: &[u8], nonce: &[u8], compress: bool) -> XResult<u64> {
+fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
+                key: &[u8], nonce: &[u8], compress: bool) -> XResult<u64> {
     let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
     let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
@@ -200,6 +247,7 @@ fn parse_encrypted_meta(meta: &TinyEncryptMeta, key: &[u8], nonce: &[u8]) -> XRe
             util::decode_base64(enc_encrypted_meta), "Decode enc-encrypted-meta failed: {}");
             let enc_meta = opt_result!(
             EncEncryptedMeta::unseal(key, nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
+            debugging!("Encrypted meta: {:?}", enc_meta);
             if let Some(filename) = &enc_meta.filename {
                 information!("Source filename: {}", filename);
             }
@@ -239,7 +287,8 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
     }
     let e_pub_key = &wrap_key.header.e_pub_key;
     let e_pub_key_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
-    let (_, subject_public_key_info) = opt_result!(SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
+    let (_, subject_public_key_info) = opt_result!(
+        SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
 
     let slot = util_piv::read_piv_slot(config, &envelop.kid, slot)?;
     let pin = util::read_pin(pin);

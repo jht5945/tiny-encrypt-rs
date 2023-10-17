@@ -2,12 +2,13 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use clap::Args;
-use rust_util::XResult;
+use rust_util::{iff, information, warning, XResult};
 use tabled::{Table, Tabled};
 use tabled::settings::Style;
 
 use crate::config::TinyEncryptConfig;
 use crate::consts::TINY_ENC_CONFIG_FILE;
+use crate::util_envelop;
 
 #[derive(Tabled, Eq)]
 struct ConfigProfile {
@@ -33,16 +34,68 @@ impl PartialOrd for ConfigProfile {
     }
 }
 
+#[derive(Tabled)]
+pub struct ConfigEnvelop {
+    pub r#type: String,
+    pub sid: String,
+    pub kid: String,
+    pub desc: String,
+    pub args: String,
+}
+
 #[derive(Debug, Args)]
 pub struct CmdConfig {
     /// Show KID
     #[arg(long)]
     pub show_kid: bool,
+    /// Encryption profile (use default when --key-filter is assigned)
+    #[arg(long, short = 'p')]
+    pub profile: Option<String>,
+    /// Encryption key filter (key_id or type:TYPE(e.g. ecdh, pgp, ecdh-p384, pgp-ed25519), multiple joined by ',', ALL for all)
+    #[arg(long, short = 'k')]
+    pub key_filter: Option<String>,
 }
 
 pub fn config(cmd_version: CmdConfig) -> XResult<()> {
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE)?;
 
+    if cmd_version.profile.is_some() || cmd_version.key_filter.is_some() {
+        return config_key_filter(&cmd_version, &config);
+    }
+    config_profiles(&cmd_version, &config)
+}
+
+fn config_key_filter(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XResult<()> {
+    let envelops = config.find_envelops(&cmd_version.profile, &cmd_version.key_filter)?;
+    if envelops.is_empty() { warning!("Found no envelops"); }
+    information!("Found {} envelops", envelops.len());
+    let mut config_envelops = vec![];
+    for envelop in envelops {
+        config_envelops.push(ConfigEnvelop {
+            r#type: envelop.r#type.get_name().to_string(),
+            sid: envelop.sid.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()),
+            kid: process_kid(&envelop.kid),
+            desc: envelop.desc.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()),
+            args: envelop.args.as_ref().map(|a| format!("[{}]", a.join(", "))).unwrap_or_else(|| "-".to_string()),
+        });
+    }
+    let mut table = Table::new(config_envelops);
+    table.with(Style::sharp());
+    println!("{}", table);
+    Ok(())
+}
+
+fn process_kid(kid: &str) -> String {
+    if kid.len() < 10 {
+        kid.to_string()
+    } else {
+        kid.chars().enumerate()
+            .filter(|(i, _c)| *i <= 50)
+            .map(|(i, c)| iff!(i >= 48, '.', c)).collect()
+    }
+}
+
+fn config_profiles(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XResult<()> {
     let mut reverse_map = HashMap::new();
     for (p, v) in &config.profiles {
         let p = p;
@@ -78,7 +131,10 @@ pub fn config(cmd_version: CmdConfig) -> XResult<()> {
                     let desc = envelop.desc.as_ref()
                         .map(|desc| format!(", Desc: {}", desc))
                         .unwrap_or_else(|| "".to_string());
-                    ks.push(format!("{}, {}{}", envelop.r#type.get_name(), kid, desc));
+                    ks.push(format!(
+                        "{}, {}{}",
+                        util_envelop::with_width_type(envelop.r#type.get_name()), kid, desc
+                    ));
                 }
             }
         }

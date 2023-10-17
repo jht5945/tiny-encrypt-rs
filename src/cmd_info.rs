@@ -45,7 +45,7 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     );
 
     if cmd_info.raw_meta {
-        success!("Meta data:\n{}", serde_json::to_string_pretty(&meta).expect("SHOULD NOT HAPPEN"));
+        println!("{}", serde_json::to_string_pretty(&meta).expect("SHOULD NOT HAPPEN"));
         return Ok(());
     }
 

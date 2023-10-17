@@ -10,6 +10,14 @@ use zeroize::Zeroize;
 
 use crate::consts::TINY_ENC_FILE_EXT;
 
+pub struct SecVec(pub Vec<u8>);
+
+impl Drop for SecVec {
+    fn drop(&mut self) {
+        self.0.zeroize()
+    }
+}
+
 pub fn read_pin(pin: &Option<String>) -> String {
     match pin {
         Some(pin) => pin.to_string(),
@@ -68,14 +76,15 @@ pub fn require_file_not_exists(path: impl AsRef<Path>) -> XResult<()> {
     }
 }
 
-pub fn make_key256_and_nonce() -> (Vec<u8>, Vec<u8>) {
+pub fn make_key256_and_nonce() -> (SecVec, SecVec) {
     let key: [u8; 32] = random();
     let nonce: [u8; 12] = random();
-    let result = (key.into(), nonce.into());
+    let key_vec: Vec<u8> = key.into();
+    let nonce_vec: Vec<u8> = nonce.into();
     let (mut key, mut nonce) = (key, nonce);
     key.zeroize();
     nonce.zeroize();
-    result
+    (SecVec(key_vec), SecVec(nonce_vec))
 }
 
 pub fn simple_kdf(input: &[u8]) -> Vec<u8> {

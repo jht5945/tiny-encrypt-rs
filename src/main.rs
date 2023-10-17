@@ -11,10 +11,11 @@ use crate::cmd_version::CmdVersion;
 
 mod consts;
 mod util;
-mod util_process;
+mod util_digest;
+mod util_progress;
 mod util_piv;
 mod util_pgp;
-mod util_ecdh;
+mod util_p256;
 mod util_p384;
 mod util_x25519;
 mod compress;

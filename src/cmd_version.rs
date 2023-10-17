@@ -6,7 +6,7 @@ pub struct CmdVersion {}
 
 pub fn version(_cmd_version: CmdVersion) -> XResult<()> {
     println!(
-        "{} - {}\n{}\n",
+        "{} - v{}\n{}\n",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
         env!("CARGO_PKG_DESCRIPTION")

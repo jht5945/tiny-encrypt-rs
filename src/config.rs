@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 
-use rust_util::{debugging, opt_result, simple_error, XResult};
+use rust_util::{debugging, iff, opt_result, simple_error, XResult};
 use rust_util::util_file::resolve_file_path;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,7 @@ use crate::spec::TinyEncryptEnvelopType;
 ///         },
 ///         {
 ///             "type": "ecdh",
+///             "sid": "SHORT-ID-1",
 ///             "kid": "KID-2",
 ///             "desc": "this is key 002",
 ///             "publicPart": "04..."
@@ -83,11 +84,7 @@ impl TinyEncryptConfig {
 
     pub fn find_by_kid(&self, kid: &str) -> Option<&TinyEncryptConfigEnvelop> {
         let config_envelops = self.find_by_kid_or_filter(kid, |_| false);
-        if config_envelops.is_empty() {
-            None
-        } else {
-            Some(config_envelops[0])
-        }
+        iff!(config_envelops.is_empty(), None, Some(config_envelops[0]))
     }
 
     pub fn find_by_kid_or_type(&self, k_filter: &str) -> Vec<&TinyEncryptConfigEnvelop> {
@@ -99,11 +96,9 @@ impl TinyEncryptConfig {
     pub fn find_by_kid_or_filter<F>(&self, kid: &str, f: F) -> Vec<&TinyEncryptConfigEnvelop>
         where F: Fn(&TinyEncryptConfigEnvelop) -> bool {
         self.envelops.iter().filter(|e| {
-            if e.kid == kid {
-                return true;
-            }
+            if e.kid == kid { return true; }
             if let Some(sid) = &e.sid {
-                return sid == kid;
+                if sid == kid { return true; }
             }
             f(e)
         }).collect()
