@@ -11,6 +11,7 @@ pub fn read_and_verify_openpgp_pin(trans: &mut OpenPgpTransaction, pin: &Option<
         return simple_error!("User pin verify failed: {}", e);
     }
     success!("User pin verify success!");
+    util::zeroize(pin);
     Ok(())
 }
 

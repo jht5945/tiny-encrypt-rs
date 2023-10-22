@@ -14,6 +14,7 @@ use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
 use yubikey::piv::{AlgorithmId, decrypt_data};
 use yubikey::YubiKey;
+use zeroize::Zeroize;
 
 use crate::{consts, crypto_simple, util, util_enc_file, util_envelop, util_file, util_pgp, util_piv};
 use crate::compress::GzStreamDecoder;
@@ -56,6 +57,12 @@ pub struct CmdDecrypt {
     /// Digest algorithm (sha1, sha256[default], sha384, sha512 ...)
     #[arg(long, short = 'A')]
     pub digest_algorithm: Option<String>,
+}
+
+impl Drop for CmdDecrypt {
+    fn drop(&mut self) {
+        if let Some(p) = self.pin.as_mut() { p.zeroize(); }
+    }
 }
 
 pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
@@ -242,27 +249,26 @@ fn parse_encrypted_comment(meta: &TinyEncryptMeta, crypto: Cryptor, key: &[u8], 
 }
 
 fn parse_encrypted_meta(meta: &TinyEncryptMeta, cryptor: Cryptor, key: &[u8], nonce: &[u8]) -> XResult<Option<EncEncryptedMeta>> {
-    Ok(match &meta.encrypted_meta {
-        None => None,
-        Some(enc_encrypted_meta) => {
-            let enc_encrypted_meta_bytes = opt_result!(
+    let enc_encrypted_meta = match &meta.encrypted_meta {
+        None => return Ok(None),
+        Some(enc_encrypted_meta) => enc_encrypted_meta,
+    };
+    let enc_encrypted_meta_bytes = opt_result!(
             util::decode_base64(enc_encrypted_meta), "Decode enc-encrypted-meta failed: {}");
-            let enc_meta = opt_result!(
+    let enc_meta = opt_result!(
             EncEncryptedMeta::unseal(cryptor, key, nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
-            debugging!("Encrypted meta: {:?}", enc_meta);
-            if let Some(filename) = &enc_meta.filename {
-                information!("Source filename: {}", filename);
-            }
-            let fmt = simpledateformat::fmt(DATE_TIME_FORMAT).unwrap();
-            if let Some(c_time) = &enc_meta.c_time {
-                information!("Source file create time: {}", fmt.format_local(SystemTime::from_millis(*c_time)));
-            }
-            if let Some(m_time) = &enc_meta.c_time {
-                information!("Source file modified time: {}", fmt.format_local(SystemTime::from_millis(*m_time)));
-            }
-            Some(enc_meta)
-        }
-    })
+    debugging!("Encrypted meta: {:?}", enc_meta);
+    if let Some(filename) = &enc_meta.filename {
+        information!("Source filename: {}", filename);
+    }
+    let fmt = simpledateformat::fmt(DATE_TIME_FORMAT).unwrap();
+    if let Some(c_time) = &enc_meta.c_time {
+        information!("Source file create time: {}", fmt.format_local(SystemTime::from_millis(*c_time)));
+    }
+    if let Some(m_time) = &enc_meta.c_time {
+        information!("Source file modified time: {}", fmt.format_local(SystemTime::from_millis(*m_time)));
+    }
+    Ok(Some(enc_meta))
 }
 
 fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
@@ -311,6 +317,7 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
     let key = util::simple_kdf(shared_secret.as_slice());
     let decrypted_key = crypto_simple::decrypt(
         cryptor, &key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
+    util::zeroize(pin);
     util::zeroize(key);
     util::zeroize(shared_secret);
     Ok(decrypted_key)
@@ -320,7 +327,7 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
     let cryptor = match wrap_key.header.enc.as_str() {
         ENC_AES256_GCM_X25519 => Cryptor::Aes256Gcm,
-        ENC_CHACHA20_POLY1305_X25519 => Cryptor::Aes256Gcm,
+        ENC_CHACHA20_POLY1305_X25519 => Cryptor::ChaCha20Poly1305,
         _ => return simple_error!("Unsupported header enc: {}", &wrap_key.header.enc),
     };
     let e_pub_key = &wrap_key.header.e_pub_key;
