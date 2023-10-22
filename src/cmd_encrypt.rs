@@ -9,7 +9,6 @@ use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
 use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, XResult};
 use rust_util::util_time::UnixEpochTime;
-use zeroize::Zeroize;
 
 use crate::{consts, crypto_simple, util, util_enc_file, util_p256, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
@@ -186,7 +185,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     let compress_desc = iff!(cmd_encrypt.compress, " [with compress]", "");
     let start = Instant::now();
     encrypt_file(
-        &mut file_in, file_metadata.len(), &mut file_out,
+        &mut file_in, file_metadata.len(), &mut file_out, cryptor,
         &key.0, &nonce.0, cmd_encrypt.compress, &cmd_encrypt.compress_level,
     )?;
     drop(file_out);
@@ -219,12 +218,11 @@ fn process_compatible_with_1_0(mut encrypt_meta: TinyEncryptMeta) -> XResult<Tin
     Ok(encrypt_meta)
 }
 
-fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
+fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cryptor: Cryptor,
                 key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<u64> {
     let mut total_len = 0_u64;
     let mut write_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
-    let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
     let mut gz_encoder = match compress_level {
         None => GzStreamEncoder::new_default(),
         Some(compress_level) => {
@@ -235,7 +233,7 @@ fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
         }
     };
     let progress = Progress::new(file_len);
-    let mut encryptor = aes_gcm_stream::Aes256GcmStreamEncryptor::new(key, nonce);
+    let mut encryptor = cryptor.encryptor(key, nonce)?;
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
         if len == 0 {
@@ -275,8 +273,6 @@ fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
             progress.position(total_len);
         }
     }
-    let mut key = key;
-    key.zeroize();
     Ok(total_len)
 }
 

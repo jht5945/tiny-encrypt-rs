@@ -14,7 +14,6 @@ use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
 use yubikey::piv::{AlgorithmId, decrypt_data};
 use yubikey::YubiKey;
-use zeroize::Zeroize;
 
 use crate::{consts, crypto_simple, util, util_enc_file, util_envelop, util_file, util_pgp, util_piv};
 use crate::compress::GzStreamDecoder;
@@ -143,7 +142,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 
         let mut output: Vec<u8> = Vec::with_capacity(10 * 1024);
         let _ = decrypt_file(
-            &mut file_in, meta.file_length, &mut output, &key.0, &nonce.0, meta.compress,
+            &mut file_in, meta.file_length, &mut output, cryptor, &key.0, &nonce.0, meta.compress,
         )?;
         match String::from_utf8(output) {
             Err(_) => warning!("File is not UTF-8 content."),
@@ -156,7 +155,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     if cmd_decrypt.digest_file {
         let mut digest_write = DigestWrite::from_algo(digest_algorithm)?;
         let _ = decrypt_file(
-            &mut file_in, meta.file_length, &mut digest_write, &key.0, &nonce.0, meta.compress,
+            &mut file_in, meta.file_length, &mut digest_write, cryptor, &key.0, &nonce.0, meta.compress,
         )?;
         let digest = digest_write.digest();
         success!("File digest {}: {}", digest_algorithm.to_uppercase(), hex::encode(digest));
@@ -174,7 +173,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 
     let mut file_out = File::create(path_out)?;
     let _ = decrypt_file(
-        &mut file_in, meta.file_length, &mut file_out, &key.0, &nonce.0, meta.compress,
+        &mut file_in, meta.file_length, &mut file_out, cryptor, &key.0, &nonce.0, meta.compress,
     )?;
     drop(file_out);
     util_file::update_out_file_time(enc_meta, path_out);
@@ -187,12 +186,11 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 }
 
 fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
-                key: &[u8], nonce: &[u8], compress: bool) -> XResult<u64> {
+                cryptor: Cryptor, key: &[u8], nonce: &[u8], compress: bool) -> XResult<u64> {
     let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
-    let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
     let progress = Progress::new(file_len);
-    let mut decryptor = aes_gcm_stream::Aes256GcmStreamDecryptor::new(key, nonce);
+    let mut decryptor = cryptor.decryptor(key, nonce)?;
     let mut gz_decoder = GzStreamDecoder::new();
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
@@ -222,8 +220,6 @@ fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
             progress.position(total_len);
         }
     }
-    let mut key = key;
-    key.zeroize();
     Ok(total_len)
 }
 
