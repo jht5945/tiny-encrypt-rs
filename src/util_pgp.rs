@@ -17,7 +17,6 @@ pub fn read_and_verify_openpgp_pin(trans: &mut OpenPgpTransaction, pin: &Option<
 pub fn get_openpgp() -> XResult<OpenPgp> {
     let card = match get_card() {
         Err(e) => {
-            failure!("Get PGP card failed: {}", e);
             return simple_error!("Get card failed: {}", e);
         }
         Ok(card) => card

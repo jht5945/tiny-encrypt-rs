@@ -8,6 +8,7 @@ pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
 pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
 
 pub const TINY_ENC_AES_GCM: &str = "AES/GCM";
+pub const TINY_ENC_CHACHA20_POLY1305: &str = "CHACHA20/POLY1305";
 
 // Tiny enc magic tag
 pub const TINY_ENC_MAGIC_TAG: u16 = 0x01;

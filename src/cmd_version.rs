@@ -1,15 +1,15 @@
 use clap::Args;
 use rust_util::XResult;
+use crate::util;
 
 #[derive(Debug, Args)]
 pub struct CmdVersion {}
 
 pub fn version(_cmd_version: CmdVersion) -> XResult<()> {
     println!(
-        "{} - v{}\n{}\n",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
-        env!("CARGO_PKG_DESCRIPTION")
+        "User-Agent: {}\n{}",
+        util::get_user_agent(),
+        env!("CARGO_PKG_DESCRIPTION"),
     );
     Ok(())
 }

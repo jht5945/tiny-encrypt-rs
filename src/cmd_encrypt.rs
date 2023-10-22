@@ -11,14 +11,14 @@ use rust_util::{debugging, failure, iff, information, opt_result, simple_error, 
 use rust_util::util_time::UnixEpochTime;
 use zeroize::Zeroize;
 
-use crate::{util, util_enc_file, util_p256, util_p384, util_x25519};
+use crate::{consts, crypto_simple, util, util_enc_file, util_p256, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::consts::{
     ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
     SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
 };
-use crate::crypto_aes::{aes_gcm_encrypt, aes_gcm_encrypt_with_salt};
+use crate::crypto_cryptor::Cryptor;
 use crate::crypto_rsa::parse_spki;
 use crate::spec::{
     EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10,
@@ -58,6 +58,9 @@ pub struct CmdEncrypt {
     /// Disable compress meta
     #[arg(long)]
     pub disable_compress_meta: bool,
+    /// Encryption algorithm (AES/GCM, CHACHA20/POLY1305 or AES, CHACHA20, default AES/GCM)
+    #[arg(long, short = 'A')]
+    pub encryption_algorithm: Option<String>,
 }
 
 pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
@@ -116,6 +119,16 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         return Ok(0);
     }
 
+    let encryption_algorithm = cmd_encrypt.encryption_algorithm.as_ref()
+        .map(String::as_str).unwrap_or(consts::TINY_ENC_AES_GCM)
+        .to_lowercase();
+    let cryptor = match encryption_algorithm.as_str() {
+        "aes" | "aes/gcm" => Cryptor::Aes256Gcm,
+        "chacha20" | "chacha20/poly1305" => Cryptor::ChaCha20Poly1305,
+        _ => return simple_error!("Unknown encryption algorithm: {}, should be AES or CHACHA20", encryption_algorithm),
+    };
+    information!("Using encryption algorithm: {}", cryptor.get_name());
+
     util::require_file_exists(path)?;
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
@@ -129,7 +142,8 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     let encrypted_comment = match &cmd_encrypt.encrypted_comment {
         None => None,
         Some(encrypted_comment) => Some(util::encode_base64(
-            &aes_gcm_encrypt_with_salt(&key.0, &nonce.0, SALT_COMMENT, encrypted_comment.as_bytes())?))
+            &crypto_simple::encrypt_with_salt(
+                cryptor, &key.0, &nonce.0, SALT_COMMENT, encrypted_comment.as_bytes())?))
     };
 
     let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
@@ -138,7 +152,8 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         c_time: file_metadata.created().ok().and_then(|t| t.to_millis()),
         m_time: file_metadata.modified().ok().and_then(|t| t.to_millis()),
     };
-    let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(&key.0, &nonce.0), "Seal enc-encrypted-meta failed: {}");
+    let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(
+        cryptor, &key.0, &nonce.0), "Seal enc-encrypted-meta failed: {}");
 
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
@@ -147,11 +162,21 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         compress: cmd_encrypt.compress,
     };
 
-    let mut encrypt_meta = TinyEncryptMeta::new(&file_metadata, &enc_metadata, &nonce.0, envelops);
+    let mut encrypt_meta = TinyEncryptMeta::new(
+        &file_metadata, &enc_metadata, cryptor, &nonce.0, envelops);
     debugging!("Encrypted meta: {:?}", encrypt_meta);
 
     if cmd_encrypt.compatible_with_1_0 {
-        encrypt_meta = process_compatible_with_1_0(cmd_encrypt, encrypt_meta)?;
+        if !cmd_encrypt.disable_compress_meta {
+            return simple_error!("Compatible with 1.0 mode must turns --disable-compress-meta on.");
+        }
+        if let Cryptor::Aes256Gcm = Cryptor::Aes256Gcm {} else {
+            return simple_error!("Compatible with 1.0 mode must use AES/GCM.");
+        }
+        encrypt_meta = process_compatible_with_1_0(encrypt_meta)?;
+        if encrypt_meta.pgp_envelop.is_none() && encrypt_meta.ecdh_envelop.is_none() {
+            return simple_error!("Compatible with 1.0 mode must contains PGP or ECDH Envelop.");
+        }
     }
 
     let mut file_out = File::create(&path_out)?;
@@ -172,10 +197,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     Ok(file_metadata.len())
 }
 
-fn process_compatible_with_1_0(cmd_encrypt: &CmdEncrypt, mut encrypt_meta: TinyEncryptMeta) -> XResult<TinyEncryptMeta> {
-    if !cmd_encrypt.disable_compress_meta {
-        return simple_error!("Compatible with 1.0 mode must turns --disable-compress-meta on.");
-    }
+fn process_compatible_with_1_0(mut encrypt_meta: TinyEncryptMeta) -> XResult<TinyEncryptMeta> {
     if let Some(envelops) = encrypt_meta.envelops {
         let mut filter_envelops = vec![];
         for envelop in envelops {
@@ -197,9 +219,10 @@ fn process_compatible_with_1_0(cmd_encrypt: &CmdEncrypt, mut encrypt_meta: TinyE
     Ok(encrypt_meta)
 }
 
-fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File,
+fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
                 key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<u64> {
     let mut total_len = 0_u64;
+    let mut write_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
     let key = opt_result!(key.try_into(), "Key is not 32 bytes: {}");
     let mut gz_encoder = match compress_level {
@@ -216,21 +239,28 @@ fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File,
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
         if len == 0 {
-            let last_block = if compress {
+            let last_block_and_tag = if compress {
                 let last_compressed_buffer = opt_result!(gz_encoder.finalize(), "Decompress file failed: {}");
                 let mut encrypted_block = encryptor.update(&last_compressed_buffer);
                 let (last_block, tag) = encryptor.finalize();
+                write_len += encrypted_block.len() as u64;
+                write_len += last_block.len() as u64;
                 encrypted_block.extend_from_slice(&last_block);
                 encrypted_block.extend_from_slice(&tag);
                 encrypted_block
             } else {
                 let (mut last_block, tag) = encryptor.finalize();
+                write_len += last_block.len() as u64;
                 last_block.extend_from_slice(&tag);
                 last_block
             };
-            opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
-            debugging!("Encrypt finished, total bytes: {}", total_len);
+            opt_result!(file_out.write_all(&last_block_and_tag), "Write file failed: {}");
             progress.finish();
+            debugging!("Encrypt finished, total bytes: {}", total_len);
+            if compress {
+                information!("File is compressed: {} byte(s) -> {} byte(s), ratio: {}%",
+                    total_len, write_len, util::ratio(write_len, total_len));
+            }
             break;
         } else {
             total_len += len as u64;
@@ -240,6 +270,7 @@ fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut File,
             } else {
                 encryptor.update(&buffer[0..len])
             };
+            write_len += encrypted.len() as u64;
             opt_result!(file_out.write_all(&encrypted), "Write file failed: {}");
             progress.position(total_len);
         }
@@ -300,7 +331,8 @@ fn encrypt_envelop_shared_secret(key: &[u8],
     let shared_key = util::simple_kdf(shared_secret);
     let (_, nonce) = util::make_key256_and_nonce();
 
-    let encrypted_key = aes_gcm_encrypt(&shared_key, &nonce.0, key)?;
+    let encrypted_key = crypto_simple::encrypt(
+        Cryptor::Aes256Gcm, &shared_key, &nonce.0, key)?;
 
     let wrap_key = WrapKey {
         header: WrapKeyHeader {

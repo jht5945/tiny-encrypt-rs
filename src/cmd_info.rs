@@ -17,7 +17,7 @@ pub struct CmdInfo {
     /// File
     pub paths: Vec<PathBuf>,
     /// Show raw meta
-    #[arg(long, default_value_t = false)]
+    #[arg(long, short = 'M', default_value_t = false)]
     pub raw_meta: bool,
 }
 

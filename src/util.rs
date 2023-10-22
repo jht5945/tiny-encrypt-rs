@@ -133,29 +133,60 @@ pub fn read_number(hint: &str, from: usize, to: usize) -> usize {
 }
 
 pub fn get_user_agent() -> String {
-    format!("TinyEncrypt-rs v{}@{}", env!("CARGO_PKG_VERSION"),
-            if cfg!(target_os = "macos") {
-                "MacOS"
-            } else if cfg!(target_os = "ios") {
-                "iOS"
-            } else if cfg!(target_os = "android") {
-                "Android"
-            } else if cfg!(target_os = "windows") {
-                "Windows"
-            } else if cfg!(target_os = "linux") {
-                "Linux"
-            } else if cfg!(target_os = "freebsd") {
-                "FreeBSD"
-            } else if cfg!(target_os = "dragonfly") {
-                "Dragonfly"
-            } else if cfg!(target_os = "openbsd") {
-                "OpenBSD"
-            } else if cfg!(target_os = "netbsd") {
-                "NetBSD"
-            } else {
-                panic!("Unsupported OS!");
-            }
+    format!("TinyEncrypt-rs v{}@{}-{}",
+            env!("CARGO_PKG_VERSION"),
+            get_os(), get_arch(),
     )
+}
+
+pub fn get_os() -> String {
+    if cfg!(target_os = "macos") {
+        "macOS"
+    } else if cfg!(target_os = "ios") {
+        "iOS"
+    } else if cfg!(target_os = "android") {
+        "Android"
+    } else if cfg!(target_os = "windows") {
+        "Windows"
+    } else if cfg!(target_os = "linux") {
+        "Linux"
+    } else if cfg!(target_os = "freebsd") {
+        "FreeBSD"
+    } else if cfg!(target_os = "dragonfly") {
+        "Dragonfly"
+    } else if cfg!(target_os = "openbsd") {
+        "OpenBSD"
+    } else if cfg!(target_os = "netbsd") {
+        "NetBSD"
+    } else {
+        "UnknownOS"
+    }.to_string()
+}
+
+pub fn get_arch() -> String {
+    if cfg!(target_arch = "x86_64") {
+        "x86-64"
+    } else if cfg!(target_arch = "x86") {
+        "x86"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else if cfg!(target_arch = "arm") {
+        "arm"
+    } else if cfg!(target_arch = "riscv64") {
+        "riscv64"
+    } else if cfg!(target_arch = "riscv32") {
+        "riscv32"
+    } else if cfg!(target_arch = "mips64") {
+        "mips64"
+    } else if cfg!(target_arch = "mips") {
+        "mips"
+    } else if cfg!(target_arch = "powerpc64") {
+        "powerpc64"
+    } else if cfg!(target_arch = "powerpc") {
+        "powerpc"
+    } else {
+        "unknown"
+    }.to_string()
 }
 
 pub fn zeroize(object: impl Zeroize) {
@@ -170,3 +201,10 @@ pub fn read_line(ln: &str) {
     let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");
 }
 
+pub fn ratio(numerator: u64, denominator: u64) -> String {
+    if denominator == 0 {
+        return "∞".to_string();
+    }
+    let r = (numerator * 10000) / denominator;
+    format!("{:.2}", r as f64 / 100f64)
+}

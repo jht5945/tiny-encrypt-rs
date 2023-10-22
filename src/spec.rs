@@ -5,8 +5,9 @@ use rust_util::{opt_result, util_time, XResult};
 use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
 
-use crate::{compress, crypto_aes};
-use crate::consts::{SALT_META, TINY_ENC_AES_GCM};
+use crate::{compress, crypto_simple};
+use crate::consts::SALT_META;
+use crate::crypto_cryptor::Cryptor;
 use crate::util::{encode_base64, get_user_agent};
 
 pub const TINY_ENCRYPT_VERSION_10: &str = "1.0";
@@ -104,21 +105,21 @@ pub struct EncEncryptedMeta {
 }
 
 impl EncEncryptedMeta {
-    pub fn unseal(key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Self> {
-        let mut decrypted = opt_result!(crypto_aes::try_aes_gcm_decrypt_with_salt(
-            key, nonce, SALT_META, message), "Decrypt failed: {}");
+    pub fn unseal(crypto: Cryptor, key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Self> {
+        let mut decrypted = opt_result!(crypto_simple::try_decrypt_with_salt(
+            crypto, key, nonce, SALT_META, message), "Decrypt failed: {}");
         decrypted = opt_result!(compress::decompress(&decrypted), "Decode faield: {}");
         let meta = opt_result!(
             serde_json::from_slice::<Self>(&decrypted), "Parse failed: {}");
         Ok(meta)
     }
 
-    pub fn seal(&self, key: &[u8], nonce: &[u8]) -> XResult<Vec<u8>> {
+    pub fn seal(&self, crypto: Cryptor, key: &[u8], nonce: &[u8]) -> XResult<Vec<u8>> {
         let mut encrypted_meta_json = serde_json::to_vec(self).unwrap();
         encrypted_meta_json = opt_result!(
             compress::compress(Compression::default(), &encrypted_meta_json), "Compress failed: {}");
-        let encrypted = opt_result!(crypto_aes::aes_gcm_encrypt_with_salt(
-                key, nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt failed: {}");
+        let encrypted = opt_result!(crypto_simple::encrypt_with_salt(
+                crypto, key, nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt failed: {}");
         Ok(encrypted)
     }
 }
@@ -131,7 +132,7 @@ pub struct EncMetadata {
 }
 
 impl TinyEncryptMeta {
-    pub fn new(metadata: &Metadata, enc_metadata: &EncMetadata, nonce: &[u8], envelops: Vec<TinyEncryptEnvelop>) -> Self {
+    pub fn new(metadata: &Metadata, enc_metadata: &EncMetadata, cryptor: Cryptor, nonce: &[u8], envelops: Vec<TinyEncryptEnvelop>) -> Self {
         TinyEncryptMeta {
             version: TINY_ENCRYPT_VERSION_11.to_string(),
             created: util_time::get_current_millis() as u64,
@@ -147,7 +148,7 @@ impl TinyEncryptMeta {
             ecdh_point: None,
             envelop: None,
             envelops: Some(envelops),
-            encryption_algorithm: Some(TINY_ENC_AES_GCM.to_string()),
+            encryption_algorithm: Some(cryptor.get_name()),
             nonce: encode_base64(nonce),
             file_length: metadata.len(),
             file_last_modified: match metadata.modified() {
