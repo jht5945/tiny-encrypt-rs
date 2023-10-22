@@ -19,7 +19,9 @@ use crate::{consts, crypto_simple, util, util_enc_file, util_envelop, util_file,
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
 use crate::consts::{
-    DATE_TIME_FORMAT, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
+    DATE_TIME_FORMAT,
+    ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
+    ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519,
     SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
 };
 use crate::crypto_cryptor::Cryptor;
@@ -108,8 +110,8 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
         util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
     debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
 
-    let encryption_algorithm = meta.encryption_algorithm
-        .as_ref().map(String::as_str).unwrap_or(consts::TINY_ENC_AES_GCM);
+    let encryption_algorithm = meta.encryption_algorithm.as_deref()
+        .unwrap_or(consts::TINY_ENC_AES_GCM);
     let cryptor = Cryptor::from(encryption_algorithm)?;
 
     let do_skip_file_out = cmd_decrypt.skip_decrypt_file || cmd_decrypt.direct_print || cmd_decrypt.digest_file;
@@ -181,7 +183,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     let encrypt_duration = start.elapsed();
     debugging!("Inner decrypt file{}: {} elapsed: {} ms", compressed_desc, path_display, encrypt_duration.as_millis());
 
-    if do_skip_file_out & &cmd_decrypt.remove_file { util::remove_file_with_msg(path); }
+    if do_skip_file_out && cmd_decrypt.remove_file { util::remove_file_with_msg(path); }
     Ok(meta.file_length)
 }
 
@@ -270,8 +272,7 @@ fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
     match envelop.r#type {
         TinyEncryptEnvelopType::Pgp => try_decrypt_key_pgp(envelop, pin),
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
-        TinyEncryptEnvelopType::Ecdh => try_decrypt_key_ecdh(config, envelop, pin, ENC_AES256_GCM_P256, slot),
-        TinyEncryptEnvelopType::EcdhP384 => try_decrypt_key_ecdh(config, envelop, pin, ENC_AES256_GCM_P384, slot),
+        TinyEncryptEnvelopType::Ecdh | TinyEncryptEnvelopType::EcdhP384 => try_decrypt_key_ecdh(config, envelop, pin, slot),
         unknown_type => simple_error!("Unknown or unsupported type: {}", unknown_type.get_name()),
     }
 }
@@ -279,12 +280,15 @@ fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
 fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
                         envelop: &TinyEncryptEnvelop,
                         pin: &Option<String>,
-                        expected_enc_type: &str,
                         slot: &Option<String>) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
-    if wrap_key.header.enc.as_str() != expected_enc_type {
-        return simple_error!("Unsupported header, requires: {} actual: {}", expected_enc_type, &wrap_key.header.enc);
-    }
+    let (cryptor, algo_id) = match wrap_key.header.enc.as_str() {
+        ENC_AES256_GCM_P256 => (Cryptor::Aes256Gcm, AlgorithmId::EccP256),
+        ENC_AES256_GCM_P384 => (Cryptor::Aes256Gcm, AlgorithmId::EccP384),
+        ENC_CHACHA20_POLY1305_P256 => (Cryptor::ChaCha20Poly1305, AlgorithmId::EccP256),
+        ENC_CHACHA20_POLY1305_P384 => (Cryptor::ChaCha20Poly1305, AlgorithmId::EccP384),
+        _ => return simple_error!("Unsupported header enc: {}", &wrap_key.header.enc),
+    };
     let e_pub_key = &wrap_key.header.e_pub_key;
     let e_pub_key_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
     let (_, subject_public_key_info) = opt_result!(
@@ -297,9 +301,7 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
     let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
     let slot_id = util_piv::get_slot_id(&slot)?;
     opt_result!(yk.verify_pin(pin.as_bytes()), "YubiKey verify pin failed: {}");
-    let algo_id = iff!(
-        expected_enc_type == ENC_AES256_GCM_P256, AlgorithmId::EccP256, AlgorithmId::EccP384
-    );
+
     let shared_secret = opt_result!(decrypt_data(
                 &mut yk,
                 epk_bytes,
@@ -308,7 +310,7 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
             ), "Decrypt via PIV card failed: {}");
     let key = util::simple_kdf(shared_secret.as_slice());
     let decrypted_key = crypto_simple::decrypt(
-        Cryptor::Aes256Gcm, &key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
+        cryptor, &key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
     util::zeroize(key);
     util::zeroize(shared_secret);
     Ok(decrypted_key)
@@ -316,9 +318,11 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
 
 fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
-    if wrap_key.header.enc.as_str() != ENC_AES256_GCM_X25519 {
-        return simple_error!("Unsupported header, requires: {} actual: {}", ENC_AES256_GCM_X25519, &wrap_key.header.enc);
-    }
+    let cryptor = match wrap_key.header.enc.as_str() {
+        ENC_AES256_GCM_X25519 => Cryptor::Aes256Gcm,
+        ENC_CHACHA20_POLY1305_X25519 => Cryptor::Aes256Gcm,
+        _ => return simple_error!("Unsupported header enc: {}", &wrap_key.header.enc),
+    };
     let e_pub_key = &wrap_key.header.e_pub_key;
     let epk_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
 
@@ -331,7 +335,7 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
 
     let key = util::simple_kdf(shared_secret.as_slice());
     let decrypted_key = crypto_simple::decrypt(
-        Cryptor::Aes256Gcm, &key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
+        cryptor, &key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
     util::zeroize(key);
     util::zeroize(shared_secret);
     Ok(decrypted_key)

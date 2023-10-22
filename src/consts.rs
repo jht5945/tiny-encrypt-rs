@@ -2,6 +2,9 @@
 pub const ENC_AES256_GCM_P256: &str = "aes256-gcm-p256";
 pub const ENC_AES256_GCM_P384: &str = "aes256-gcm-p384";
 pub const ENC_AES256_GCM_X25519: &str = "aes256-gcm-x25519";
+pub const ENC_CHACHA20_POLY1305_P256: &str = "chacha20-poly1305-p256";
+pub const ENC_CHACHA20_POLY1305_P384: &str = "chacha20-poly1305-p384";
+pub const ENC_CHACHA20_POLY1305_X25519: &str = "chacha20-poly1305-x25519";
 
 // Extend and config file
 pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
