@@ -1,7 +1,7 @@
 use std::io;
 use std::io::Write;
 
-use rust_util::{information, simple_error, XResult};
+use rust_util::{information, print_ex, simple_error, XResult};
 use yubikey::piv::{RetiredSlotId, SlotId};
 
 use crate::config::TinyEncryptConfig;
@@ -16,7 +16,7 @@ pub fn read_piv_slot(config: &Option<TinyEncryptConfig>, kid: &str, slot: &Optio
                     return Ok(first_arg.to_string());
                 }
             }
-            print!("Input slot(eg 82, 83 ...): ");
+            print_ex!("Input slot(eg 82, 83 ...): ");
             io::stdout().flush().ok();
             let mut buff = String::new();
             let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");

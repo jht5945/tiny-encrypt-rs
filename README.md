@@ -14,6 +14,11 @@ Specification: [Tiny Encrypt Spec V1.1](https://github.com/OpenWebStandard/tiny-
 
 Repository address: https://git.hatter.ink/hatter/tiny-encrypt-rs mirror https://github.com/jht5945/tiny-encrypt-rs
 
+Set default encryption algorithm:
+```shell
+export TINY_ENCRYPT_DEFAULT_ALGORITHM='AES' # or CHACHA20
+```
+
 <br>
 
 Encrypt config `~/.tinyencrypt/config-rs.json`:

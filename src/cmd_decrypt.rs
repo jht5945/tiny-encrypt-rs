@@ -5,10 +5,7 @@ use std::time::{Instant, SystemTime};
 
 use clap::Args;
 use openpgp_card::crypto_data::Cryptogram;
-use rust_util::{
-    debugging, failure, iff, information, opt_result, simple_error, success,
-    warning, XResult,
-};
+use rust_util::{debugging, failure, iff, information, opt_result, println_ex, simple_error, success, util_msg, warning, XResult};
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -51,6 +48,9 @@ pub struct CmdDecrypt {
     /// Direct print to the console, file must less than 10K
     #[arg(long, short = 'P')]
     pub direct_print: bool,
+    /// Split std out and std err
+    #[arg(long)]
+    pub split_print: bool,
     /// Digest file
     #[arg(long, short = 'D')]
     pub digest_file: bool,
@@ -66,6 +66,7 @@ impl Drop for CmdDecrypt {
 }
 
 pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
+    if cmd_decrypt.split_print { util_msg::set_logger_std_out(false); }
     debugging!("Cmd decrypt: {:?}", cmd_decrypt);
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
 
@@ -155,7 +156,11 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
         )?;
         match String::from_utf8(output) {
             Err(_) => warning!("File is not UTF-8 content."),
-            Ok(output) => println!(">>>>> BEGIN CONTENT >>>>>\n{}\n<<<<< END CONTENT <<<<<", &output),
+            Ok(output) => if cmd_decrypt.split_print {
+                print!("{}", &output)
+            } else {
+                println!(">>>>> BEGIN CONTENT >>>>>\n{}\n<<<<< END CONTENT <<<<<", &output)
+            }
         }
         return Ok(meta.file_length);
     }
@@ -381,7 +386,7 @@ fn select_envelop<'a>(meta: &'a TinyEncryptMeta, config: &Option<TinyEncryptConf
     }
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {
-        println!("#{} {}", i + 1, util_envelop::format_envelop(envelop, config));
+        println_ex!("#{} {}", i + 1, util_envelop::format_envelop(envelop, config));
     });
 
     let envelop_number = util::read_number("Please select an envelop:", 1, envelops.len());

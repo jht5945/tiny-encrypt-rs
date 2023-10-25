@@ -10,7 +10,7 @@ use rsa::Pkcs1v15Encrypt;
 use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, XResult};
 use rust_util::util_time::UnixEpochTime;
 
-use crate::{consts, crypto_simple, util, util_enc_file, util_p256, util_p384, util_x25519};
+use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_p256, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::consts::{
@@ -119,14 +119,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         return Ok(0);
     }
 
-    let encryption_algorithm = cmd_encrypt.encryption_algorithm.as_deref()
-        .unwrap_or(consts::TINY_ENC_AES_GCM)
-        .to_lowercase();
-    let cryptor = match encryption_algorithm.as_str() {
-        "aes" | "aes/gcm" => Cryptor::Aes256Gcm,
-        "chacha20" | "chacha20/poly1305" => Cryptor::ChaCha20Poly1305,
-        _ => return simple_error!("Unknown encryption algorithm: {}, should be AES or CHACHA20", encryption_algorithm),
-    };
+    let cryptor = crypto_cryptor::get_cryptor_by_encryption_algorithm(&cmd_encrypt.encryption_algorithm)?;
     information!("Using encryption algorithm: {}", cryptor.get_name());
 
     util::require_file_exists(path)?;
@@ -184,10 +177,13 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
 
     let compress_desc = iff!(cmd_encrypt.compress, " [with compress]", "");
+
+    let compress_level = iff!(cmd_encrypt.compress,
+        Some(cmd_encrypt.compress_level.unwrap_or_else(|| Compression::default().level())), None);
     let start = Instant::now();
     encrypt_file(
         &mut file_in, file_metadata.len(), &mut file_out, cryptor,
-        &key.0, &nonce.0, cmd_encrypt.compress, &cmd_encrypt.compress_level,
+        &key.0, &nonce.0, &compress_level,
     )?;
     drop(file_out);
     let encrypt_duration = start.elapsed();
@@ -220,7 +216,8 @@ fn process_compatible_with_1_0(mut encrypt_meta: TinyEncryptMeta) -> XResult<Tin
 }
 
 fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cryptor: Cryptor,
-                key: &[u8], nonce: &[u8], compress: bool, compress_level: &Option<u32>) -> XResult<u64> {
+                key: &[u8], nonce: &[u8], compress_level: &Option<u32>) -> XResult<u64> {
+    let compress = compress_level.is_some();
     let mut total_len = 0_u64;
     let mut write_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
@@ -336,14 +333,14 @@ fn encrypt_envelop_shared_secret(cryptor: Cryptor,
                                  enc_type: &str,
                                  envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let shared_key = util::simple_kdf(shared_secret);
-    let (_, nonce) = util::make_key256_and_nonce();
+    let nonce = util::make_nonce();
 
     let encrypted_key = crypto_simple::encrypt(
         cryptor, &shared_key, &nonce.0, key)?;
 
     let wrap_key = WrapKey {
         header: WrapKeyHeader {
-            kid: None, // Some(envelop.kid.clone()),
+            kid: None,
             enc: enc_type.to_string(),
             e_pub_key: util::encode_base64_url_no_pad(ephemeral_spki),
         },
@@ -355,7 +352,7 @@ fn encrypt_envelop_shared_secret(cryptor: Cryptor,
     Ok(TinyEncryptEnvelop {
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),
-        desc: None, // envelop.desc.clone(),
+        desc: None,
         encrypted_key: encoded_wrap_key,
     })
 }
@@ -367,7 +364,7 @@ fn encrypt_envelop_pgp(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResul
     Ok(TinyEncryptEnvelop {
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),
-        desc: None, // envelop.desc.clone(),
+        desc: None,
         encrypted_key: util::encode_base64(&encrypted_key),
     })
 }

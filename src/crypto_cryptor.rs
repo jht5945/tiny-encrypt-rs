@@ -3,7 +3,7 @@ use chacha20_poly1305_stream::{ChaCha20Poly1305StreamDecryptor, ChaCha20Poly1305
 use rust_util::{opt_result, simple_error, XResult};
 use zeroize::Zeroize;
 
-use crate::consts;
+use crate::{consts, util_env};
 
 #[derive(Debug, Copy, Clone)]
 pub enum Cryptor {
@@ -16,7 +16,7 @@ impl Cryptor {
         match algorithm {
             "aes256-gcm" | consts::TINY_ENC_AES_GCM => Ok(Cryptor::Aes256Gcm),
             "chacha20-poly1305" | consts::TINY_ENC_CHACHA20_POLY1305 => Ok(Cryptor::ChaCha20Poly1305),
-            _ => simple_error!("Unknown altorighm: {}",algorithm),
+            _ => simple_error!("Unknown algorithm: {}",algorithm),
         }
     }
 
@@ -150,6 +150,20 @@ impl Decryptor for ChaCha20Poly1305Decryptor {
     fn finalize(&mut self) -> XResult<Vec<u8>> {
         Ok(self.chacha20_poly1305_stream_decryptor.finalize()?)
     }
+}
+
+#[allow(clippy::redundant_closure)]
+pub fn get_cryptor_by_encryption_algorithm(encryption_algorithm: &Option<String>) -> XResult<Cryptor> {
+    let encryption_algorithm = encryption_algorithm.as_deref()
+        .or_else(|| util_env::get_default_encryption_algorithm())
+        .unwrap_or(consts::TINY_ENC_AES_GCM)
+        .to_lowercase();
+    let cryptor = match encryption_algorithm.as_str() {
+        "aes" | "aes/gcm" => Cryptor::Aes256Gcm,
+        "chacha20" | "chacha20/poly1305" => Cryptor::ChaCha20Poly1305,
+        _ => return simple_error!("Unknown encryption algorithm: {}, should be AES or CHACHA20", encryption_algorithm),
+    };
+    Ok(cryptor)
 }
 
 #[test]

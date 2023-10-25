@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use base64::engine::general_purpose;
 use rand::random;
-use rust_util::{information, simple_error, util_term, warning, XResult};
+use rust_util::{information, print_ex, simple_error, util_term, warning, XResult};
 use zeroize::Zeroize;
 
 use crate::consts::TINY_ENC_FILE_EXT;
@@ -76,6 +76,11 @@ pub fn require_file_not_exists(path: impl AsRef<Path>) -> XResult<()> {
     }
 }
 
+pub fn make_nonce() -> SecVec {
+    let (_, nonce) = make_key256_and_nonce();
+    nonce
+}
+
 pub fn make_key256_and_nonce() -> (SecVec, SecVec) {
     let key: [u8; 32] = random();
     let nonce: [u8; 12] = random();
@@ -116,7 +121,7 @@ pub fn decode_base64_url_no_pad(input: &str) -> XResult<Vec<u8>> {
 
 pub fn read_number(hint: &str, from: usize, to: usize) -> usize {
     loop {
-        print!("{} ({}-{}): ", hint, from, to);
+        print_ex!("{} ({}-{}): ", hint, from, to);
         io::stdout().flush().ok();
         let mut buff = String::new();
         let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");
@@ -195,7 +200,7 @@ pub fn zeroize(object: impl Zeroize) {
 }
 
 pub fn read_line(ln: &str) {
-    print!("{}", ln);
+    print_ex!("{}", ln);
     io::stdout().flush().ok();
     let mut buff = String::new();
     let _ = io::stdin().read_line(&mut buff).expect("Read line from stdin");

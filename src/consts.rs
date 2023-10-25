@@ -10,6 +10,7 @@ pub const ENC_CHACHA20_POLY1305_X25519: &str = "chacha20-poly1305-x25519";
 pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
 pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
 
+pub const TINY_ENCRYPT_ENV_DEFAULT_ALGORITHM: &str = "TINY_ENCRYPT_DEFAULT_ALGORITHM";
 pub const TINY_ENC_AES_GCM: &str = "AES/GCM";
 pub const TINY_ENC_CHACHA20_POLY1305: &str = "CHACHA20/POLY1305";
 
