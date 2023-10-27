@@ -22,7 +22,7 @@ use crate::consts::{
     ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519,
     SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
 };
-use crate::crypto_cryptor::Cryptor;
+use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
 use crate::util::SecVec;
 use crate::util_digest::DigestWrite;
@@ -114,7 +114,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     util::require_tiny_enc_file_and_exists(path)?;
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
-    let meta = opt_result!(
+    let (_, meta) = opt_result!(
         util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
     debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
 
@@ -136,12 +136,13 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 
     let key = SecVec(try_decrypt_key(config, selected_envelop, pin, slot)?);
     let nonce = SecVec(opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}"));
+    let key_nonce = KeyNonce { k: &key.0, n: &nonce.0 };
 
     // debugging!("Decrypt key: {}", hex::encode(&key.0));
     debugging!("Decrypt nonce: {}", hex::encode(&nonce.0));
 
-    let enc_meta = parse_encrypted_meta(&meta, cryptor, &key.0, &nonce.0)?;
-    parse_encrypted_comment(&meta, cryptor, &key.0, &nonce.0)?;
+    let enc_meta = parse_encrypted_meta(&meta, cryptor, &key_nonce)?;
+    parse_encrypted_comment(&meta, cryptor, &key_nonce)?;
 
     // Decrypt to output
     if cmd_decrypt.direct_print {
@@ -152,7 +153,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 
         let mut output: Vec<u8> = Vec::with_capacity(10 * 1024);
         let _ = decrypt_file(
-            &mut file_in, meta.file_length, &mut output, cryptor, &key.0, &nonce.0, meta.compress,
+            &mut file_in, meta.file_length, &mut output, cryptor, &key_nonce, meta.compress,
         )?;
         match String::from_utf8(output) {
             Err(_) => warning!("File is not UTF-8 content."),
@@ -169,7 +170,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     if cmd_decrypt.digest_file {
         let mut digest_write = DigestWrite::from_algo(digest_algorithm)?;
         let _ = decrypt_file(
-            &mut file_in, meta.file_length, &mut digest_write, cryptor, &key.0, &nonce.0, meta.compress,
+            &mut file_in, meta.file_length, &mut digest_write, cryptor, &key_nonce, meta.compress,
         )?;
         let digest = digest_write.digest();
         success!("File digest {}: {}", digest_algorithm.to_uppercase(), hex::encode(digest));
@@ -187,7 +188,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 
     let mut file_out = File::create(path_out)?;
     let _ = decrypt_file(
-        &mut file_in, meta.file_length, &mut file_out, cryptor, &key.0, &nonce.0, meta.compress,
+        &mut file_in, meta.file_length, &mut file_out, cryptor, &key_nonce, meta.compress,
     )?;
     drop(file_out);
     util_file::update_out_file_time(enc_meta, path_out);
@@ -200,11 +201,11 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 }
 
 fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
-                cryptor: Cryptor, key: &[u8], nonce: &[u8], compress: bool) -> XResult<u64> {
+                cryptor: Cryptor, key_nonce: &KeyNonce, compress: bool) -> XResult<u64> {
     let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
     let progress = Progress::new(file_len);
-    let mut decryptor = cryptor.decryptor(key, nonce)?;
+    let mut decryptor = cryptor.decryptor(key_nonce)?;
     let mut gz_decoder = GzStreamDecoder::new();
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
@@ -237,11 +238,11 @@ fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
     Ok(total_len)
 }
 
-fn parse_encrypted_comment(meta: &TinyEncryptMeta, crypto: Cryptor, key: &[u8], nonce: &[u8]) -> XResult<()> {
+fn parse_encrypted_comment(meta: &TinyEncryptMeta, crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<()> {
     if let Some(encrypted_comment) = &meta.encrypted_comment {
         match util::decode_base64(encrypted_comment) {
             Err(e) => warning!("Decode encrypted comment failed: {}", e),
-            Ok(ec_bytes) => match crypto_simple::try_decrypt_with_salt(crypto, key, nonce, SALT_COMMENT, &ec_bytes) {
+            Ok(ec_bytes) => match crypto_simple::try_decrypt_with_salt(crypto, key_nonce, SALT_COMMENT, &ec_bytes) {
                 Err(e) => warning!("Decrypt encrypted comment failed: {}", e),
                 Ok(decrypted_comment_bytes) => match String::from_utf8(decrypted_comment_bytes.clone()) {
                     Err(_) => success!("Encrypted message hex: {}", hex::encode(&decrypted_comment_bytes)),
@@ -253,7 +254,7 @@ fn parse_encrypted_comment(meta: &TinyEncryptMeta, crypto: Cryptor, key: &[u8], 
     Ok(())
 }
 
-fn parse_encrypted_meta(meta: &TinyEncryptMeta, cryptor: Cryptor, key: &[u8], nonce: &[u8]) -> XResult<Option<EncEncryptedMeta>> {
+fn parse_encrypted_meta(meta: &TinyEncryptMeta, cryptor: Cryptor, key_nonce: &KeyNonce) -> XResult<Option<EncEncryptedMeta>> {
     let enc_encrypted_meta = match &meta.encrypted_meta {
         None => return Ok(None),
         Some(enc_encrypted_meta) => enc_encrypted_meta,
@@ -261,7 +262,7 @@ fn parse_encrypted_meta(meta: &TinyEncryptMeta, cryptor: Cryptor, key: &[u8], no
     let enc_encrypted_meta_bytes = opt_result!(
             util::decode_base64(enc_encrypted_meta), "Decode enc-encrypted-meta failed: {}");
     let enc_meta = opt_result!(
-            EncEncryptedMeta::unseal(cryptor, key, nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
+            EncEncryptedMeta::unseal(cryptor, key_nonce, &enc_encrypted_meta_bytes), "Unseal enc-encrypted-meta failed: {}");
     debugging!("Encrypted meta: {:?}", enc_meta);
     if let Some(filename) = &enc_meta.filename {
         information!("Source filename: {}", filename);
@@ -320,8 +321,9 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
                 slot_id,
             ), "Decrypt via PIV card failed: {}");
     let key = util::simple_kdf(shared_secret.as_slice());
+    let key_nonce = KeyNonce { k: &key, n: &wrap_key.nonce };
     let decrypted_key = crypto_simple::decrypt(
-        cryptor, &key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
+        cryptor, &key_nonce, &wrap_key.encrypted_data)?;
     util::zeroize(pin);
     util::zeroize(key);
     util::zeroize(shared_secret);
@@ -346,8 +348,9 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
     let shared_secret = trans.decipher(Cryptogram::ECDH(&epk_bytes))?;
 
     let key = util::simple_kdf(shared_secret.as_slice());
+    let key_nonce = KeyNonce { k: &key, n: &wrap_key.nonce };
     let decrypted_key = crypto_simple::decrypt(
-        cryptor, &key, &wrap_key.nonce, &wrap_key.encrypted_data)?;
+        cryptor, &key_nonce, &wrap_key.encrypted_data)?;
     util::zeroize(key);
     util::zeroize(shared_secret);
     Ok(decrypted_key)

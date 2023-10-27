@@ -4,6 +4,10 @@ use flate2::Compression;
 use flate2::write::{GzDecoder, GzEncoder};
 use rust_util::{simple_error, XResult};
 
+pub fn compress_default(message: &[u8]) -> XResult<Vec<u8>> {
+    compress(Compression::default(), message)
+}
+
 pub fn compress(compression: Compression, message: &[u8]) -> XResult<Vec<u8>> {
     let mut encoder = GzStreamEncoder::new(compression);
     let mut buff = encoder.update(message)?;

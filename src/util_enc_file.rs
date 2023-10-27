@@ -1,6 +1,5 @@
 use std::io::{Read, Write};
 
-use flate2::Compression;
 use rust_util::{debugging, iff, opt_result, simple_error, XResult};
 
 use crate::compress;
@@ -13,7 +12,7 @@ pub fn write_tiny_encrypt_meta(w: &mut impl Write, meta: &TinyEncryptMeta, compr
     let mut encrypted_meta_bytes = opt_result!(serde_json::to_vec(&meta), "Generate meta json bytes failed: {}");
     if compress_meta {
         encrypted_meta_bytes = opt_result!(
-            compress::compress(Compression::default(), &encrypted_meta_bytes), "Compress encrypted meta failed: {}");
+            compress::compress_default(&encrypted_meta_bytes), "Compress encrypted meta failed: {}");
     }
     let encrypted_meta_bytes_len = encrypted_meta_bytes.len() as u32;
     debugging!("Encrypted meta len: {}", encrypted_meta_bytes_len);
@@ -23,16 +22,17 @@ pub fn write_tiny_encrypt_meta(w: &mut impl Write, meta: &TinyEncryptMeta, compr
     Ok(encrypted_meta_bytes.len() + 2 + 4)
 }
 
-pub fn read_tiny_encrypt_meta_and_normalize(r: &mut impl Read) -> XResult<TinyEncryptMeta> {
-    let mut meta = read_tiny_encrypt_meta(r);
-    let _ = meta.as_mut().map(|meta| meta.normalize());
-    meta
+pub fn read_tiny_encrypt_meta_and_normalize(r: &mut impl Read) -> XResult<(u32, TinyEncryptMeta)> {
+    let mut meta_and_len = read_tiny_encrypt_meta(r);
+    let _ = meta_and_len.as_mut().map(|meta| meta.1.normalize());
+    meta_and_len
 }
 
-pub fn read_tiny_encrypt_meta(r: &mut impl Read) -> XResult<TinyEncryptMeta> {
+pub fn read_tiny_encrypt_meta(r: &mut impl Read) -> XResult<(u32, TinyEncryptMeta)> {
     let mut tag_buff = [0_u8; 2];
     opt_result!(r.read_exact(&mut tag_buff), "Read tag failed: {}");
     let tag = u16::from_be_bytes(tag_buff);
+    debugging!("Found tag: {}", tag);
     let is_normal_tiny_enc = tag == TINY_ENC_MAGIC_TAG;
     let is_compressed_tiny_enc = tag == TINY_ENC_COMPRESSED_MAGIC_TAG;
     if !is_normal_tiny_enc && !is_compressed_tiny_enc {
@@ -57,5 +57,5 @@ pub fn read_tiny_encrypt_meta(r: &mut impl Read) -> XResult<TinyEncryptMeta> {
     }
     debugging!("Encrypted meta: {}", String::from_utf8_lossy(&meta_buff));
 
-    Ok(opt_result!(serde_json::from_slice(&meta_buff), "Parse meta failed: {}"))
+    Ok((length, opt_result!(serde_json::from_slice(&meta_buff), "Parse meta failed: {}")))
 }

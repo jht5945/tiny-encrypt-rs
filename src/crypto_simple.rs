@@ -1,26 +1,28 @@
 use rust_util::XResult;
 
-use crate::crypto_cryptor::Cryptor;
+use crate::crypto_cryptor::{Cryptor, KeyNonce};
 
-pub fn try_decrypt_with_salt(crypto: Cryptor, key: &[u8], nonce: &[u8], salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    let new_nonce = build_salted_nonce(nonce, salt);
-    if let Ok(decrypted) = decrypt(crypto, key, &new_nonce, message) {
+pub fn try_decrypt_with_salt(crypto: Cryptor, key_nonce: &KeyNonce, salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
+    let new_nonce = build_salted_nonce(key_nonce.n, salt);
+    let new_key_nonce = KeyNonce { k: key_nonce.k, n: &new_nonce };
+    if let Ok(decrypted) = decrypt(crypto, &new_key_nonce, message) {
         return Ok(decrypted);
     }
-    decrypt(crypto, key, nonce, message)
+    decrypt(crypto, key_nonce, message)
 }
 
-pub fn decrypt(crypto: Cryptor, key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    crypto.decryptor(key, nonce)?.decrypt(message)
+pub fn decrypt(crypto: Cryptor, key_nonce: &KeyNonce, message: &[u8]) -> XResult<Vec<u8>> {
+    crypto.decryptor(key_nonce)?.decrypt(message)
 }
 
-pub fn encrypt_with_salt(crypto: Cryptor, key: &[u8], nonce: &[u8], salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    let new_nonce = build_salted_nonce(nonce, salt);
-    encrypt(crypto, key, &new_nonce, message)
+pub fn encrypt_with_salt(crypto: Cryptor, key_nonce: &KeyNonce, salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
+    let new_nonce = build_salted_nonce(key_nonce.n, salt);
+    let new_key_nonce = KeyNonce { k: key_nonce.k, n: &new_nonce };
+    encrypt(crypto, &new_key_nonce, message)
 }
 
-pub fn encrypt(crypto: Cryptor, key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
-    Ok(crypto.encryptor(key, nonce)?.encrypt(message))
+pub fn encrypt(crypto: Cryptor, key_nonce: &KeyNonce, message: &[u8]) -> XResult<Vec<u8>> {
+    Ok(crypto.encryptor(key_nonce)?.encrypt(message))
 }
 
 fn build_salted_nonce(nonce: &[u8], salt: &[u8]) -> Vec<u8> {

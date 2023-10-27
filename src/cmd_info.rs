@@ -4,13 +4,15 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clap::Args;
-use rust_util::{opt_result, simple_error, success, util_time, warning, XResult};
+use rust_util::{debugging, failure, iff, opt_result, simple_error, success, util_msg, util_size, util_time, XResult};
+use rust_util::util_msg::MessageType;
 use rust_util::util_time::UnixEpochTime;
 use simpledateformat::format_human2;
 
-use crate::{util_enc_file, util_envelop};
+use crate::{util, util_enc_file, util_envelop};
 use crate::config::TinyEncryptConfig;
 use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
+use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
 pub struct CmdInfo {
@@ -25,7 +27,7 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
     for (i, path) in cmd_info.paths.iter().enumerate() {
         if i > 0 { println!("{}", "-".repeat(88)); }
         if let Err(e) = info_single(path, &cmd_info) {
-            warning!("Parse Tiny Encrypt file info failed: {}", e);
+            failure!("Parse Tiny Encrypt file info failed: {}", e);
         }
     }
     println!();
@@ -40,7 +42,9 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
 
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
-    let meta = opt_result!(
+    let file_in_len = file_in.metadata().map(|m| m.len()).unwrap_or(0);
+
+    let (meta_len, meta) = opt_result!(
         util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display
     );
 
@@ -53,7 +57,20 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     infos.push("Tiny Encrypt File Info".to_string());
     let compressed = if meta.compress { " [compressed]" } else { "" };
     infos.push(format!("{}: {}{}", header("File name"), path_display, compressed));
-    infos.push(format!("{}: {} bytes", header("File size"), meta.file_length));
+
+    if meta.compress && file_in_len > (2 + 4 + meta_len as u64) {
+        let actual_file_in_len = file_in_len - 2 - 4 - meta_len as u64;
+        infos.push(format!("{}: {}, after compressed {}, ratio: {}%",
+                           header("File size"),
+                           util_size::get_display_size(meta.file_length as i64),
+                           util_size::get_display_size(actual_file_in_len as i64),
+                           util::ratio(actual_file_in_len, meta.file_length)
+        ));
+    } else {
+        infos.push(format!("{}: {}", header("File size"),
+                           util_size::get_display_size(meta.file_length as i64)));
+    }
+
     infos.push(format!("{}: Version: {}, Agent: {}",
                        header("File summary"), meta.version, meta.user_agent)
     );
@@ -77,6 +94,11 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
                                header(&format!("Envelop #{}", i + 1)),
                                util_envelop::format_envelop(envelop, &config)
             ));
+            util_msg::when(MessageType::DEBUG, || {
+                if let Ok(wrap_key) = WrapKey::parse(&envelop.encrypted_key) {
+                    debugging!("Wrap key: {}", serde_json::to_string(&wrap_key).expect("SHOULD NOT HAPPEN"));
+                }
+            });
         })
     }
 
@@ -105,5 +127,5 @@ fn header(h: &str) -> String {
 }
 
 fn to_yes_or_no(opt: &Option<String>) -> String {
-    opt.as_ref().map(|_| "YES".to_string()).unwrap_or_else(|| "NO".to_string())
+    iff!(opt.is_some(), "YES", "NO").to_string()
 }

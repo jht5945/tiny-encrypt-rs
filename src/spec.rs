@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{compress, crypto_simple};
 use crate::consts::SALT_META;
-use crate::crypto_cryptor::Cryptor;
+use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::util::{encode_base64, get_user_agent};
 
 pub const TINY_ENCRYPT_VERSION_10: &str = "1.0";
@@ -105,21 +105,21 @@ pub struct EncEncryptedMeta {
 }
 
 impl EncEncryptedMeta {
-    pub fn unseal(crypto: Cryptor, key: &[u8], nonce: &[u8], message: &[u8]) -> XResult<Self> {
+    pub fn unseal(crypto: Cryptor, key_nonce: &KeyNonce, message: &[u8]) -> XResult<Self> {
         let mut decrypted = opt_result!(crypto_simple::try_decrypt_with_salt(
-            crypto, key, nonce, SALT_META, message), "Decrypt failed: {}");
+            crypto, key_nonce, SALT_META, message), "Decrypt failed: {}");
         decrypted = opt_result!(compress::decompress(&decrypted), "Decode faield: {}");
         let meta = opt_result!(
             serde_json::from_slice::<Self>(&decrypted), "Parse failed: {}");
         Ok(meta)
     }
 
-    pub fn seal(&self, crypto: Cryptor, key: &[u8], nonce: &[u8]) -> XResult<Vec<u8>> {
+    pub fn seal(&self, crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<Vec<u8>> {
         let mut encrypted_meta_json = serde_json::to_vec(self).unwrap();
         encrypted_meta_json = opt_result!(
             compress::compress(Compression::default(), &encrypted_meta_json), "Compress failed: {}");
         let encrypted = opt_result!(crypto_simple::encrypt_with_salt(
-                crypto, key, nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt failed: {}");
+                crypto, key_nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt failed: {}");
         Ok(encrypted)
     }
 }

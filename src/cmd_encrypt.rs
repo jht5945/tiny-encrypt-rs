@@ -18,7 +18,7 @@ use crate::consts::{
     ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519,
     SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
 };
-use crate::crypto_cryptor::Cryptor;
+use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::crypto_rsa;
 use crate::spec::{
     EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10,
@@ -112,7 +112,13 @@ pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
     Ok(())
 }
 
-fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
+pub fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
+    let path_display = format!("{}", path.display());
+    let path_out = format!("{}{}", path_display, TINY_ENC_FILE_EXT);
+    encrypt_single_file_out(path, &path_out, envelops, cmd_encrypt)
+}
+
+pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
     if path_display.ends_with(TINY_ENC_FILE_EXT) {
         information!("Tiny enc file skipped: {}", path_display);
@@ -126,17 +132,17 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
 
-    let path_out = format!("{}{}", path_display, TINY_ENC_FILE_EXT);
-    util::require_file_not_exists(path_out.as_str())?;
+    util::require_file_not_exists(path_out)?;
 
     let (key, nonce) = util::make_key256_and_nonce();
+    let key_nonce = KeyNonce { k: &key.0, n: &nonce.0 };
     let envelops = encrypt_envelops(cryptor, &key.0, envelops)?;
 
     let encrypted_comment = match &cmd_encrypt.encrypted_comment {
         None => None,
         Some(encrypted_comment) => Some(util::encode_base64(
             &crypto_simple::encrypt_with_salt(
-                cryptor, &key.0, &nonce.0, SALT_COMMENT, encrypted_comment.as_bytes())?))
+                cryptor, &key_nonce, SALT_COMMENT, encrypted_comment.as_bytes())?))
     };
 
     let file_metadata = opt_result!(fs::metadata(path), "Read file: {} meta failed: {}", path.display());
@@ -146,7 +152,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         m_time: file_metadata.modified().ok().and_then(|t| t.to_millis()),
     };
     let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(
-        cryptor, &key.0, &nonce.0), "Seal enc-encrypted-meta failed: {}");
+        cryptor, &key_nonce), "Seal enc-encrypted-meta failed: {}");
 
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
@@ -172,7 +178,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
         }
     }
 
-    let mut file_out = File::create(&path_out)?;
+    let mut file_out = File::create(path_out)?;
     let compress_meta = !cmd_encrypt.disable_compress_meta;
     let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
 
@@ -183,7 +189,7 @@ fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_en
     let start = Instant::now();
     encrypt_file(
         &mut file_in, file_metadata.len(), &mut file_out, cryptor,
-        &key.0, &nonce.0, &compress_level,
+        &key_nonce, &compress_level,
     )?;
     drop(file_out);
     let encrypt_duration = start.elapsed();
@@ -216,7 +222,7 @@ fn process_compatible_with_1_0(mut encrypt_meta: TinyEncryptMeta) -> XResult<Tin
 }
 
 fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cryptor: Cryptor,
-                key: &[u8], nonce: &[u8], compress_level: &Option<u32>) -> XResult<u64> {
+                key_nonce: &KeyNonce, compress_level: &Option<u32>) -> XResult<u64> {
     let compress = compress_level.is_some();
     let mut total_len = 0_u64;
     let mut write_len = 0_u64;
@@ -231,7 +237,7 @@ fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cr
         }
     };
     let progress = Progress::new(file_len);
-    let mut encryptor = cryptor.encryptor(key, nonce)?;
+    let mut encryptor = cryptor.encryptor(key_nonce)?;
     loop {
         let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
         if len == 0 {
@@ -334,9 +340,10 @@ fn encrypt_envelop_shared_secret(cryptor: Cryptor,
                                  envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let shared_key = util::simple_kdf(shared_secret);
     let nonce = util::make_nonce();
+    let key_nonce = KeyNonce { k: &shared_key, n: &nonce.0 };
 
     let encrypted_key = crypto_simple::encrypt(
-        cryptor, &shared_key, &nonce.0, key)?;
+        cryptor, &key_nonce, key)?;
 
     let wrap_key = WrapKey {
         header: WrapKeyHeader {

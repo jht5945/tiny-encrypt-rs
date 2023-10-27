@@ -5,6 +5,12 @@ use zeroize::Zeroize;
 
 use crate::{consts, util_env};
 
+pub struct KeyNonce<'a, 'b> {
+    pub k: &'a [u8],
+    pub n: &'b [u8],
+}
+
+
 #[derive(Debug, Copy, Clone)]
 pub enum Cryptor {
     Aes256Gcm,
@@ -28,12 +34,12 @@ impl Cryptor {
         name.to_string()
     }
 
-    pub fn encryptor(self, key: &[u8], nonce: &[u8]) -> XResult<Box<dyn Encryptor>> {
-        get_encryptor(self, key, nonce)
+    pub fn encryptor(self, key_nonce: &KeyNonce) -> XResult<Box<dyn Encryptor>> {
+        get_encryptor(self, key_nonce)
     }
 
-    pub fn decryptor(self, key: &[u8], nonce: &[u8]) -> XResult<Box<dyn Decryptor>> {
-        get_decryptor(self, key, nonce)
+    pub fn decryptor(self, key_nonce: &KeyNonce) -> XResult<Box<dyn Decryptor>> {
+        get_decryptor(self, key_nonce)
     }
 }
 
@@ -64,34 +70,34 @@ pub trait Decryptor {
     }
 }
 
-fn get_encryptor(crypto: Cryptor, key: &[u8], nonce: &[u8]) -> XResult<Box<dyn Encryptor>> {
+fn get_encryptor(crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<Box<dyn Encryptor>> {
     match crypto {
         Cryptor::Aes256Gcm => {
-            let mut key: [u8; 32] = opt_result!(key.try_into(), "Bad AES 256 key: {}");
-            let aes256_gcm_stream_encryptor = Aes256GcmStreamEncryptor::new(key, nonce);
+            let mut key: [u8; 32] = opt_result!(key_nonce.k.try_into(), "Bad AES 256 key: {}");
+            let aes256_gcm_stream_encryptor = Aes256GcmStreamEncryptor::new(key, key_nonce.n);
             key.zeroize();
             Ok(Box::new(Aes256GcmEncryptor {
                 aes256_gcm_stream_encryptor,
             }))
         }
         Cryptor::ChaCha20Poly1305 => Ok(Box::new(ChaCha20Poly1305Encryptor {
-            chacha20_poly1305_stream_encryptor: ChaCha20Poly1305StreamEncryptor::new(key, nonce)?,
+            chacha20_poly1305_stream_encryptor: ChaCha20Poly1305StreamEncryptor::new(key_nonce.k, key_nonce.n)?,
         }))
     }
 }
 
-fn get_decryptor(crypto: Cryptor, key: &[u8], nonce: &[u8]) -> XResult<Box<dyn Decryptor>> {
+fn get_decryptor(crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<Box<dyn Decryptor>> {
     match crypto {
         Cryptor::Aes256Gcm => {
-            let mut key: [u8; 32] = opt_result!(key.try_into(), "Bad AES 256 key: {}");
-            let aes256_gcm_stream_decryptor = Aes256GcmStreamDecryptor::new(key, nonce);
+            let mut key: [u8; 32] = opt_result!(key_nonce.k.try_into(), "Bad AES 256 key: {}");
+            let aes256_gcm_stream_decryptor = Aes256GcmStreamDecryptor::new(key, key_nonce.n);
             key.zeroize();
             Ok(Box::new(Aes256GcmDecryptor {
                 aes256_gcm_stream_decryptor,
             }))
         }
         Cryptor::ChaCha20Poly1305 => Ok(Box::new(ChaCha20Poly1305Decryptor {
-            chacha20_poly1305_stream_decryptor: ChaCha20Poly1305StreamDecryptor::new(key, nonce)?,
+            chacha20_poly1305_stream_decryptor: ChaCha20Poly1305StreamDecryptor::new(key_nonce.k, key_nonce.n)?,
         }))
     }
 }
@@ -170,9 +176,10 @@ pub fn get_cryptor_by_encryption_algorithm(encryption_algorithm: &Option<String>
 fn test_cryptor() {
     let key = [0u8; 32];
     let nonce = [0u8; 12];
-    let ciphertext = Cryptor::Aes256Gcm.encryptor(&key, &nonce).unwrap()
+    let key_nonce = KeyNonce { k: &key, n: &nonce };
+    let ciphertext = Cryptor::Aes256Gcm.encryptor(&key_nonce).unwrap()
         .encrypt(b"hello world");
-    let plaintext = Cryptor::Aes256Gcm.decryptor(&key, &nonce).unwrap()
+    let plaintext = Cryptor::Aes256Gcm.decryptor(&key_nonce).unwrap()
         .decrypt(&ciphertext).unwrap();
 
     assert_eq!(b"hello world", plaintext.as_slice());

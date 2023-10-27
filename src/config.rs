@@ -2,7 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fs;
 
-use rust_util::{debugging, iff, opt_result, simple_error, XResult};
+use rust_util::{debugging, opt_result, simple_error, XResult};
 use rust_util::util_file::resolve_file_path;
 use serde::{Deserialize, Serialize};
 
@@ -57,20 +57,20 @@ impl TinyEncryptConfig {
         );
         let mut config: TinyEncryptConfig = opt_result!(
             serde_json::from_str(&config_contents),"Parse file: {}, failed: {}", file);
-        let mut splitted_profiles = HashMap::new();
+        let mut splited_profiles = HashMap::new();
         for (k, v) in config.profiles.into_iter() {
             if !k.contains(',') {
-                splitted_profiles.insert(k, v);
+                splited_profiles.insert(k, v);
             } else {
                 k.split(',')
                     .map(|k| k.trim())
                     .filter(|k| !k.is_empty())
                     .for_each(|k| {
-                        splitted_profiles.insert(k.to_string(), v.clone());
+                        splited_profiles.insert(k.to_string(), v.clone());
                     });
             }
         }
-        config.profiles = splitted_profiles;
+        config.profiles = splited_profiles;
         Ok(config)
     }
 
@@ -84,7 +84,7 @@ impl TinyEncryptConfig {
 
     pub fn find_by_kid(&self, kid: &str) -> Option<&TinyEncryptConfigEnvelop> {
         let config_envelops = self.find_by_kid_or_filter(kid, |_| false);
-        iff!(config_envelops.is_empty(), None, Some(config_envelops[0]))
+        config_envelops.first().map(|e| *e)
     }
 
     pub fn find_by_kid_or_type(&self, k_filter: &str) -> Vec<&TinyEncryptConfigEnvelop> {
