@@ -46,7 +46,7 @@ pub fn read_tiny_encrypt_meta(r: &mut impl Read) -> XResult<(u32, TinyEncryptMet
         return simple_error!("Meta too large: {}", length);
     }
 
-    debugging!("Encrypted meta len: {}", length);
+    debugging!("Encrypted meta length: {}", length);
     let mut meta_buff = vec![0; length as usize];
     opt_result!(r.read_exact(meta_buff.as_mut_slice()), "Read meta failed: {}");
 

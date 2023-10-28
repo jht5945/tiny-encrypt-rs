@@ -74,14 +74,16 @@ fn get_encryptor(crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<Box<dyn Encry
     match crypto {
         Cryptor::Aes256Gcm => {
             let mut key: [u8; 32] = opt_result!(key_nonce.k.try_into(), "Bad AES 256 key: {}");
-            let aes256_gcm_stream_encryptor = Aes256GcmStreamEncryptor::new(key, key_nonce.n);
+            let aes256_gcm_stream_encryptor = Aes256GcmStreamEncryptor::new(
+                key, key_nonce.n);
             key.zeroize();
             Ok(Box::new(Aes256GcmEncryptor {
                 aes256_gcm_stream_encryptor,
             }))
         }
         Cryptor::ChaCha20Poly1305 => Ok(Box::new(ChaCha20Poly1305Encryptor {
-            chacha20_poly1305_stream_encryptor: ChaCha20Poly1305StreamEncryptor::new(key_nonce.k, key_nonce.n)?,
+            chacha20_poly1305_stream_encryptor: ChaCha20Poly1305StreamEncryptor::new(
+                key_nonce.k, key_nonce.n)?,
         }))
     }
 }
@@ -90,14 +92,16 @@ fn get_decryptor(crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<Box<dyn Decry
     match crypto {
         Cryptor::Aes256Gcm => {
             let mut key: [u8; 32] = opt_result!(key_nonce.k.try_into(), "Bad AES 256 key: {}");
-            let aes256_gcm_stream_decryptor = Aes256GcmStreamDecryptor::new(key, key_nonce.n);
+            let aes256_gcm_stream_decryptor = Aes256GcmStreamDecryptor::new(
+                key, key_nonce.n);
             key.zeroize();
             Ok(Box::new(Aes256GcmDecryptor {
                 aes256_gcm_stream_decryptor,
             }))
         }
         Cryptor::ChaCha20Poly1305 => Ok(Box::new(ChaCha20Poly1305Decryptor {
-            chacha20_poly1305_stream_decryptor: ChaCha20Poly1305StreamDecryptor::new(key_nonce.k, key_nonce.n)?,
+            chacha20_poly1305_stream_decryptor: ChaCha20Poly1305StreamDecryptor::new(
+                key_nonce.k, key_nonce.n)?,
         }))
     }
 }

@@ -5,7 +5,10 @@ use std::time::{Instant, SystemTime};
 
 use clap::Args;
 use openpgp_card::crypto_data::Cryptogram;
-use rust_util::{debugging, failure, iff, information, opt_result, println_ex, simple_error, success, util_msg, warning, XResult};
+use rust_util::{
+    debugging, failure, iff, information, opt_result, println_ex, simple_error, success,
+    util_msg, util_size, warning, XResult,
+};
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -81,10 +84,10 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
                 succeed_count += 1;
                 total_len += len;
                 success!(
-                    "Decrypt {} succeed, cost {} ms, file size {} byte(s)",
+                    "Decrypt {} succeed, cost {} ms, file size {}",
                     path.to_str().unwrap_or("N/A"),
                     start_decrypt_single.elapsed().as_millis(),
-                    len
+                    util_size::get_display_size(len as i64)
                 );
             }
             Err(e) => {
@@ -95,9 +98,9 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     }
     if (succeed_count + failed_count) > 1 {
         success!(
-            "Decrypt succeed {} file(s) {} byte(s), failed {} file(s), total cost {} ms",
+            "Decrypt succeed {} file(s) {}, failed {} file(s), total cost {} ms",
             succeed_count,
-            total_len,
+            util_size::get_display_size(total_len as i64),
             failed_count,
             start.elapsed().as_millis(),
         );
@@ -116,7 +119,9 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
     let (_, meta) = opt_result!(
         util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
-    debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
+    util_msg::when_debug(|| {
+        debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
+    });
 
     let encryption_algorithm = meta.encryption_algorithm.as_deref()
         .unwrap_or(consts::TINY_ENC_AES_GCM);
@@ -126,29 +131,29 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     let path_out = &path_display[0..path_display.len() - TINY_ENC_FILE_EXT.len()];
     if !do_skip_file_out { util::require_file_not_exists(path_out)?; }
 
-    let digest_algorithm = match &cmd_decrypt.digest_algorithm {
-        None => "sha256",
-        Some(algo) => algo.as_str(),
-    };
-    if cmd_decrypt.digest_file { DigestWrite::from_algo(digest_algorithm)?; } // QUICK CHECK
+    let digest_algorithm = cmd_decrypt.digest_algorithm.as_deref().unwrap_or("sha256");
+    if cmd_decrypt.digest_file { DigestWrite::from_algo(digest_algorithm)?; } // FAST CHECK
 
     let selected_envelop = select_envelop(&meta, config)?;
 
     let key = SecVec(try_decrypt_key(config, selected_envelop, pin, slot)?);
     let nonce = SecVec(opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}"));
-    let key_nonce = KeyNonce { k: &key.0, n: &nonce.0 };
+    let key_nonce = KeyNonce { k: key.as_ref(), n: nonce.as_ref() };
 
     // debugging!("Decrypt key: {}", hex::encode(&key.0));
-    debugging!("Decrypt nonce: {}", hex::encode(&nonce.0));
+    util_msg::when_debug(|| debugging!("Decrypt nonce: {}", hex::encode(nonce.as_ref())));
 
     let enc_meta = parse_encrypted_meta(&meta, cryptor, &key_nonce)?;
     parse_encrypted_comment(&meta, cryptor, &key_nonce)?;
 
     // Decrypt to output
     if cmd_decrypt.direct_print {
-        if meta.file_length > 10 * 1024 {
-            warning!("File too large(more than 10K) cannot direct print on console.");
+        if meta.file_length > 100 * 1024 {
+            failure!("File too large(more than 100K) cannot direct print on console.");
             return Ok(0);
+        }
+        if meta.file_length > 10 * 1024 {
+            warning!("File is large(more than 10K) print on console.");
         }
 
         let mut output: Vec<u8> = Vec::with_capacity(10 * 1024);
@@ -156,7 +161,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
             &mut file_in, meta.file_length, &mut output, cryptor, &key_nonce, meta.compress,
         )?;
         match String::from_utf8(output) {
-            Err(_) => warning!("File is not UTF-8 content."),
+            Err(_) => failure!("File content is not UTF-8 encoded."),
             Ok(output) => if cmd_decrypt.split_print {
                 print!("{}", &output)
             } else {
@@ -183,7 +188,6 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     }
 
     // Decrypt to file
-    let compressed_desc = iff!(meta.compress, " [compressed]", "");
     let start = Instant::now();
 
     let mut file_out = File::create(path_out)?;
@@ -191,12 +195,18 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
         &mut file_in, meta.file_length, &mut file_out, cryptor, &key_nonce, meta.compress,
     )?;
     drop(file_out);
-    util_file::update_out_file_time(enc_meta, path_out);
+    util_file::update_file_time(enc_meta, path_out);
 
     let encrypt_duration = start.elapsed();
-    debugging!("Inner decrypt file{}: {} elapsed: {} ms", compressed_desc, path_display, encrypt_duration.as_millis());
+    debugging!("Inner decrypt file{}: {} elapsed: {} ms",
+        iff!(meta.compress, " [compressed]", ""),
+        path_display,
+        encrypt_duration.as_millis()
+    );
 
-    if do_skip_file_out && cmd_decrypt.remove_file { util::remove_file_with_msg(path); }
+    if cmd_decrypt.remove_file {
+        util::remove_file_with_msg(path);
+    }
     Ok(meta.file_length)
 }
 
@@ -220,8 +230,8 @@ fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
                 last_block
             };
             opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
-            debugging!("Decrypt finished, total bytes: {}", total_len);
             progress.finish();
+            debugging!("Decrypt finished, total: {} byte(s)", total_len);
             break;
         } else {
             total_len += len as u64;
@@ -301,8 +311,7 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
         ENC_CHACHA20_POLY1305_P384 => (Cryptor::ChaCha20Poly1305, AlgorithmId::EccP384),
         _ => return simple_error!("Unsupported header enc: {}", &wrap_key.header.enc),
     };
-    let e_pub_key = &wrap_key.header.e_pub_key;
-    let e_pub_key_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
+    let e_pub_key_bytes = wrap_key.header.get_e_pub_key_bytes()?;
     let (_, subject_public_key_info) = opt_result!(
         SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
 
@@ -337,15 +346,14 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
         ENC_CHACHA20_POLY1305_X25519 => Cryptor::ChaCha20Poly1305,
         _ => return simple_error!("Unsupported header enc: {}", &wrap_key.header.enc),
     };
-    let e_pub_key = &wrap_key.header.e_pub_key;
-    let epk_bytes = opt_result!(util::decode_base64_url_no_pad(e_pub_key), "Invalid envelop: {}");
+    let e_pub_key_bytes = wrap_key.header.get_e_pub_key_bytes()?;
 
     let mut pgp = util_pgp::get_openpgp()?;
-    let mut trans = opt_result!(pgp.transaction(), "Open card failed: {}");
+    let mut trans = opt_result!(pgp.transaction(), "Connect PIV card failed: {}");
 
     util_pgp::read_and_verify_openpgp_pin(&mut trans, pin)?;
 
-    let shared_secret = trans.decipher(Cryptogram::ECDH(&epk_bytes))?;
+    let shared_secret = trans.decipher(Cryptogram::ECDH(&e_pub_key_bytes))?;
 
     let key = util::simple_kdf(shared_secret.as_slice());
     let key_nonce = KeyNonce { k: &key, n: &wrap_key.nonce };
@@ -358,12 +366,12 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
 
 fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
     let mut pgp = util_pgp::get_openpgp()?;
-    let mut trans = opt_result!(pgp.transaction(), "Open card failed: {}");
+    let mut trans = opt_result!(pgp.transaction(), "Connect OpenPGP card failed: {}");
 
     util_pgp::read_and_verify_openpgp_pin(&mut trans, pin)?;
 
     let pgp_envelop = &envelop.encrypted_key;
-    debugging!("PGP envelop: {}", &pgp_envelop);
+    debugging!("PGP envelop: {}", pgp_envelop);
     let pgp_envelop_bytes = opt_result!(util::decode_base64(pgp_envelop), "Decode PGP envelop failed: {}");
 
     let key = trans.decipher(Cryptogram::RSA(&pgp_envelop_bytes))?;

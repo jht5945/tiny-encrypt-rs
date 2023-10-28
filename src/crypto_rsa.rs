@@ -15,7 +15,7 @@ pub fn parse_spki(pem: &str) -> XResult<RsaPublicKey> {
     let rsa_public_key = opt_result!(RsaPublicKey::new(
         BigUint::from_bytes_be(public_key.modulus),
         BigUint::from_bytes_be(public_key.exponent),
-    ), "Parse Rsa public key failed: {}");
+    ), "Parse RSA public key failed: {}");
     Ok(rsa_public_key)
 }
 
@@ -35,7 +35,7 @@ fn pem_to_der_bytes(pem: &str) -> XResult<Vec<u8>> {
     }
     pem = pem.chars().filter(|c| *c != '\n' && *c != '\r').clone().collect::<String>();
 
-    Ok(opt_result!(decode_base64(&pem), "Decode pem or der failed: {}"))
+    Ok(opt_result!(decode_base64(&pem), "Decode PEM failed: {}"))
 }
 
 #[test]

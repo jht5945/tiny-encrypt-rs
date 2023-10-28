@@ -3,6 +3,8 @@ pub use cmd_config::config;
 pub use cmd_decrypt::CmdDecrypt;
 pub use cmd_decrypt::decrypt;
 pub use cmd_decrypt::decrypt_single;
+pub use cmd_directdecrypt::CmdDirectDecrypt;
+pub use cmd_directdecrypt::direct_decrypt;
 pub use cmd_encrypt::CmdEncrypt;
 pub use cmd_encrypt::encrypt;
 pub use cmd_encrypt::encrypt_single;
@@ -38,4 +40,5 @@ mod cmd_config;
 mod cmd_info;
 mod cmd_decrypt;
 mod cmd_encrypt;
+mod cmd_directdecrypt;
 

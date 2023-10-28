@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clap::Args;
-use rust_util::{debugging, failure, iff, opt_result, simple_error, success, util_msg, util_size, util_time, XResult};
-use rust_util::util_msg::MessageType;
+use rust_util::{
+    debugging, failure, iff, opt_result, simple_error, success,
+    util_msg, util_size, util_time, XResult,
+};
 use rust_util::util_time::UnixEpochTime;
 use simpledateformat::format_human2;
 
@@ -94,7 +96,7 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
                                header(&format!("Envelop #{}", i + 1)),
                                util_envelop::format_envelop(envelop, &config)
             ));
-            util_msg::when(MessageType::DEBUG, || {
+            util_msg::when_debug(|| {
                 if let Ok(wrap_key) = WrapKey::parse(&envelop.encrypted_key) {
                     debugging!("Wrap key: {}", serde_json::to_string(&wrap_key).expect("SHOULD NOT HAPPEN"));
                 }

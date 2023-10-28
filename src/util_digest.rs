@@ -33,6 +33,10 @@ impl DigestWrite {
         }
     }
 
+    pub fn sha256() -> Self {
+        Self { digest: Box::new(Sha256::new()) }
+    }
+
     pub fn digest(self) -> Vec<u8> {
         let mut digest = self.digest;
         let mut buf: Vec<u8> = repeat(0).take((digest.output_bits() + 7) / 8).collect();

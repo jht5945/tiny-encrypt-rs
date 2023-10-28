@@ -10,7 +10,8 @@ use crate::consts::SALT_META;
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::util::{encode_base64, get_user_agent};
 
-pub const TINY_ENCRYPT_VERSION_10: &str = "1.0";
+// Compatible with 1.0 is removed from v0.6.0
+// pub const TINY_ENCRYPT_VERSION_10: &str = "1.0";
 pub const TINY_ENCRYPT_VERSION_11: &str = "1.1";
 
 /// Specification: [Tiny Encrypt Spec V1.1](https://github.com/OpenWebStandard/tiny-encrypt-format-spec/blob/main/TinyEncryptSpecv1.1.md)
@@ -107,19 +108,19 @@ pub struct EncEncryptedMeta {
 impl EncEncryptedMeta {
     pub fn unseal(crypto: Cryptor, key_nonce: &KeyNonce, message: &[u8]) -> XResult<Self> {
         let mut decrypted = opt_result!(crypto_simple::try_decrypt_with_salt(
-            crypto, key_nonce, SALT_META, message), "Decrypt failed: {}");
-        decrypted = opt_result!(compress::decompress(&decrypted), "Decode faield: {}");
+            crypto, key_nonce, SALT_META, message), "Decrypt encrypted meta failed: {}");
+        decrypted = opt_result!(compress::decompress(&decrypted), "Depress encrypted meta failed: {}");
         let meta = opt_result!(
-            serde_json::from_slice::<Self>(&decrypted), "Parse failed: {}");
+            serde_json::from_slice::<Self>(&decrypted), "Parse encrypted meta failed: {}");
         Ok(meta)
     }
 
     pub fn seal(&self, crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<Vec<u8>> {
         let mut encrypted_meta_json = serde_json::to_vec(self).unwrap();
         encrypted_meta_json = opt_result!(
-            compress::compress(Compression::default(), &encrypted_meta_json), "Compress failed: {}");
+            compress::compress(Compression::default(), &encrypted_meta_json), "Compress encrypted meta failed: {}");
         let encrypted = opt_result!(crypto_simple::encrypt_with_salt(
-                crypto, key_nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt failed: {}");
+                crypto, key_nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt encrypted meta failed: {}");
         Ok(encrypted)
     }
 }

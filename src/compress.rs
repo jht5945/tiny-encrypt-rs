@@ -2,7 +2,9 @@ use std::io::Write;
 
 use flate2::Compression;
 use flate2::write::{GzDecoder, GzEncoder};
-use rust_util::{simple_error, XResult};
+use rust_util::{opt_result, XResult};
+
+const BUFFER_SIZE: usize = 8 * 1024;
 
 pub fn compress_default(message: &[u8]) -> XResult<Vec<u8>> {
     compress(Compression::default(), message)
@@ -32,13 +34,13 @@ impl GzStreamEncoder {
     }
 
     pub fn new(compression: Compression) -> Self {
-        let buffer = Vec::with_capacity(1024 * 8);
+        let buffer = Vec::with_capacity(BUFFER_SIZE);
         let gz_encoder = GzEncoder::new(buffer, compression);
         Self { gz_encoder }
     }
 
     pub fn update(&mut self, buff: &[u8]) -> XResult<Vec<u8>> {
-        self.gz_encoder.write_all(buff)?;
+        opt_result!(self.gz_encoder.write_all(buff), "Encode Gz stream failed: {}");
         let inner = self.gz_encoder.get_mut();
         let result = inner.clone();
         inner.clear();
@@ -46,10 +48,7 @@ impl GzStreamEncoder {
     }
 
     pub fn finalize(self) -> XResult<Vec<u8>> {
-        match self.gz_encoder.finish() {
-            Ok(last_buffer) => Ok(last_buffer),
-            Err(e) => simple_error!("Decode stream failed: {}", e),
-        }
+        Ok(opt_result!(self.gz_encoder.finish(), "Encode Gz stream failed: {}"))
     }
 }
 
@@ -59,13 +58,13 @@ pub struct GzStreamDecoder {
 
 impl GzStreamDecoder {
     pub fn new() -> Self {
-        let buffer = Vec::with_capacity(1024 * 8);
+        let buffer = Vec::with_capacity(BUFFER_SIZE);
         let gz_decoder = GzDecoder::new(buffer);
         Self { gz_decoder }
     }
 
     pub fn update(&mut self, buff: &[u8]) -> XResult<Vec<u8>> {
-        self.gz_decoder.write_all(buff)?;
+        opt_result!(self.gz_decoder.write_all(buff), "Decode Gz stream failed: {}");
         let inner = self.gz_decoder.get_mut();
         let result = inner.clone();
         inner.clear();
@@ -73,10 +72,7 @@ impl GzStreamDecoder {
     }
 
     pub fn finalize(self) -> XResult<Vec<u8>> {
-        match self.gz_decoder.finish() {
-            Ok(last_buffer) => Ok(last_buffer),
-            Err(e) => simple_error!("Decode stream failed: {}", e),
-        }
+        Ok(opt_result!(self.gz_decoder.finish(), "Decode Gz stream failed: {}"))
     }
 }
 
@@ -100,7 +96,8 @@ fn test_gzip_compress() {
 
 #[test]
 fn test_gzip_compress_multi_blocks() {
-    let compressed = hex::decode("1f8b0800000000000000f348cdc9c95708cf2fca49f12081090044f4575937000000").unwrap();
+    let compressed = hex::decode(
+        "1f8b0800000000000000f348cdc9c95708cf2fca49f12081090044f4575937000000").unwrap();
     let decompressed = "Hello WorldHello WorldHello WorldHello WorldHello World";
     let mut decoder = GzStreamDecoder::new();
     let mut decompressed_bytes = vec![];

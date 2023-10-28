@@ -1,7 +1,7 @@
 use rust_util::{opt_result, simple_error, XResult};
 use serde::{Deserialize, Serialize};
 
-use crate::util::{decode_base64_url_no_pad, encode_base64_url_no_pad};
+use crate::util;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,17 +20,31 @@ pub struct WrapKeyHeader {
     pub e_pub_key: String,
 }
 
+impl WrapKeyHeader {
+    pub fn from(enc_type: &str, ephemeral_spki: &[u8]) -> Self {
+        WrapKeyHeader {
+            kid: None,
+            enc: enc_type.to_string(),
+            e_pub_key: util::encode_base64_url_no_pad(ephemeral_spki),
+        }
+    }
+
+    pub fn get_e_pub_key_bytes(self) -> XResult<Vec<u8>> {
+        Ok(opt_result!(util::decode_base64_url_no_pad(&self.e_pub_key), "Invalid envelop e_pub_key: {}"))
+    }
+}
+
 impl WrapKey {
     pub fn encode(&self) -> XResult<String> {
         let mut buf = String::with_capacity(512);
         buf.push_str("WK:");
         let header = serde_json::to_string(&self.header)?;
-        let header_str = encode_base64_url_no_pad(header.as_bytes());
+        let header_str = util::encode_base64_url_no_pad(header.as_bytes());
         buf.push_str(&header_str);
         buf.push('.');
-        buf.push_str(&encode_base64_url_no_pad(&self.nonce));
+        buf.push_str(&util::encode_base64_url_no_pad(&self.nonce));
         buf.push('.');
-        buf.push_str(&encode_base64_url_no_pad(&self.encrypted_data));
+        buf.push_str(&util::encode_base64_url_no_pad(&self.encrypted_data));
         Ok(buf)
     }
 
@@ -43,13 +57,13 @@ impl WrapKey {
             return simple_error!("Invalid wrap key.");
         }
         let header = wks[0].chars().skip(3).collect::<String>();
-        let header_bytes = opt_result!(decode_base64_url_no_pad(&header), "Invalid wrap key header: {}");
+        let header_bytes = opt_result!(util::decode_base64_url_no_pad(&header), "Invalid wrap key header: {}");
         let nonce = wks[1];
         let encrypted_data = wks[2];
         let header_str = opt_result!(String::from_utf8(header_bytes), "Invalid wrap key header: {}");
         let header: WrapKeyHeader = opt_result!(serde_json::from_str(&header_str), "Invalid wrap key header: {}");
-        let nonce = opt_result!(decode_base64_url_no_pad(nonce), "Invalid wrap key: {}");
-        let encrypted_data = opt_result!(decode_base64_url_no_pad(encrypted_data), "Invalid wrap key: {}");
+        let nonce = opt_result!(util::decode_base64_url_no_pad(nonce), "Invalid wrap key: {}");
+        let encrypted_data = opt_result!(util::decode_base64_url_no_pad(encrypted_data), "Invalid wrap key: {}");
         Ok(WrapKey {
             header,
             nonce,

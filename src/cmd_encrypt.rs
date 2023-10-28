@@ -7,10 +7,10 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, XResult};
+use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_size, XResult};
 use rust_util::util_time::UnixEpochTime;
 
-use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_p256, util_p384, util_x25519};
+use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env, util_p256, util_p384, util_x25519};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::consts::{
@@ -21,7 +21,7 @@ use crate::consts::{
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::crypto_rsa;
 use crate::spec::{
-    EncEncryptedMeta, EncMetadata, TINY_ENCRYPT_VERSION_10,
+    EncEncryptedMeta, EncMetadata,
     TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta,
 };
 use crate::util_progress::Progress;
@@ -49,9 +49,6 @@ pub struct CmdEncrypt {
     /// Compress level (from 0[none], 1[fast] .. 6[default] .. to 9[best])
     #[arg(long, short = 'L')]
     pub compress_level: Option<u32>,
-    /// Compatible with 1.0 (requires assign --disable-compress-meta)
-    #[arg(long, short = '1')]
-    pub compatible_with_1_0: bool,
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
@@ -135,8 +132,9 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
     util::require_file_not_exists(path_out)?;
 
     let (key, nonce) = util::make_key256_and_nonce();
-    let key_nonce = KeyNonce { k: &key.0, n: &nonce.0 };
-    let envelops = encrypt_envelops(cryptor, &key.0, envelops)?;
+    let key_nonce = KeyNonce { k: key.as_ref(), n: nonce.as_ref() };
+    // Encrypt session key to envelops
+    let envelops = encrypt_envelops(cryptor, key.as_ref(), envelops)?;
 
     let encrypted_comment = match &cmd_encrypt.encrypted_comment {
         None => None,
@@ -154,38 +152,25 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
     let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(
         cryptor, &key_nonce), "Seal enc-encrypted-meta failed: {}");
 
+    let compress_level = get_compress_level(cmd_encrypt);
+
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
         encrypted_comment,
         encrypted_meta: Some(util::encode_base64(&enc_encrypted_meta_bytes)),
-        compress: cmd_encrypt.compress,
+        compress: compress_level.is_some(),
     };
 
-    let mut encrypt_meta = TinyEncryptMeta::new(
-        &file_metadata, &enc_metadata, cryptor, &nonce.0, envelops);
+    let encrypt_meta = TinyEncryptMeta::new(
+        &file_metadata, &enc_metadata, cryptor, nonce.as_ref(), envelops);
     debugging!("Encrypted meta: {:?}", encrypt_meta);
-
-    if cmd_encrypt.compatible_with_1_0 {
-        if !cmd_encrypt.disable_compress_meta {
-            return simple_error!("Compatible with 1.0 mode must turns --disable-compress-meta on.");
-        }
-        if let Cryptor::Aes256Gcm = Cryptor::Aes256Gcm {} else {
-            return simple_error!("Compatible with 1.0 mode must use AES/GCM.");
-        }
-        encrypt_meta = process_compatible_with_1_0(encrypt_meta)?;
-        if encrypt_meta.pgp_envelop.is_none() && encrypt_meta.ecdh_envelop.is_none() {
-            return simple_error!("Compatible with 1.0 mode must contains PGP or ECDH Envelop.");
-        }
-    }
 
     let mut file_out = File::create(path_out)?;
     let compress_meta = !cmd_encrypt.disable_compress_meta;
     let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
 
-    let compress_desc = iff!(cmd_encrypt.compress, " [with compress]", "");
+    let compress_desc = iff!(compress_level.is_some(), " [with compress]", "");
 
-    let compress_level = iff!(cmd_encrypt.compress,
-        Some(cmd_encrypt.compress_level.unwrap_or_else(|| Compression::default().level())), None);
     let start = Instant::now();
     encrypt_file(
         &mut file_in, file_metadata.len(), &mut file_out, cryptor,
@@ -199,28 +184,6 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
     Ok(file_metadata.len())
 }
 
-fn process_compatible_with_1_0(mut encrypt_meta: TinyEncryptMeta) -> XResult<TinyEncryptMeta> {
-    if let Some(envelops) = encrypt_meta.envelops {
-        let mut filter_envelops = vec![];
-        for envelop in envelops {
-            if (envelop.r#type == TinyEncryptEnvelopType::Pgp) && encrypt_meta.pgp_envelop.is_none() {
-                encrypt_meta.pgp_fingerprint = Some(format!("KID:{}", envelop.kid));
-                encrypt_meta.pgp_envelop = Some(envelop.encrypted_key.clone());
-            } else if (envelop.r#type == TinyEncryptEnvelopType::Ecdh) && encrypt_meta.ecdh_envelop.is_none() {
-                encrypt_meta.ecdh_point = Some(format!("KID:{}", envelop.kid));
-                encrypt_meta.ecdh_envelop = Some(envelop.encrypted_key.clone());
-            } else {
-                filter_envelops.push(envelop);
-            }
-        }
-        encrypt_meta.envelops = if filter_envelops.is_empty() { None } else { Some(filter_envelops) };
-        if encrypt_meta.envelops.is_none() {
-            encrypt_meta.version = TINY_ENCRYPT_VERSION_10.to_string();
-        }
-    }
-    Ok(encrypt_meta)
-}
-
 fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cryptor: Cryptor,
                 key_nonce: &KeyNonce, compress_level: &Option<u32>) -> XResult<u64> {
     let compress = compress_level.is_some();
@@ -231,7 +194,7 @@ fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cr
         None => GzStreamEncoder::new_default(),
         Some(compress_level) => {
             if *compress_level > 9 {
-                return simple_error!("Compress level must in range [0, 9]");
+                return simple_error!("Compress level must be in range [0, 9]");
             }
             GzStreamEncoder::new(Compression::new(*compress_level))
         }
@@ -258,10 +221,12 @@ fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cr
             };
             opt_result!(file_out.write_all(&last_block_and_tag), "Write file failed: {}");
             progress.finish();
-            debugging!("Encrypt finished, total bytes: {}", total_len);
+            debugging!("Encrypt finished, total bytes: {} byte(s)", total_len);
             if compress {
-                information!("File is compressed: {} byte(s) -> {} byte(s), ratio: {}%",
-                    total_len, write_len, util::ratio(write_len, total_len));
+                information!("File is compressed: {} -> {}, ratio: {}%",
+                    util_size::get_display_size(total_len as i64),
+                    util_size::get_display_size(write_len as i64),
+                    util::ratio(write_len, total_len));
             }
             break;
         } else {
@@ -340,17 +305,13 @@ fn encrypt_envelop_shared_secret(cryptor: Cryptor,
                                  envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let shared_key = util::simple_kdf(shared_secret);
     let nonce = util::make_nonce();
-    let key_nonce = KeyNonce { k: &shared_key, n: &nonce.0 };
+    let key_nonce = KeyNonce { k: &shared_key, n: nonce.as_ref() };
 
     let encrypted_key = crypto_simple::encrypt(
         cryptor, &key_nonce, key)?;
 
     let wrap_key = WrapKey {
-        header: WrapKeyHeader {
-            kid: None,
-            enc: enc_type.to_string(),
-            e_pub_key: util::encode_base64_url_no_pad(ephemeral_spki),
-        },
+        header: WrapKeyHeader::from(enc_type, ephemeral_spki),
         nonce: nonce.0.clone(),
         encrypted_data: encrypted_key,
     };
@@ -374,4 +335,12 @@ fn encrypt_envelop_pgp(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResul
         desc: None,
         encrypted_key: util::encode_base64(&encrypted_key),
     })
+}
+
+fn get_compress_level(cmd_encrypt: &CmdEncrypt) -> Option<u32> {
+    if cmd_encrypt.compress || util_env::get_default_compress().unwrap_or(false) {
+        Some(cmd_encrypt.compress_level.unwrap_or_else(|| Compression::default().level()))
+    } else {
+        None
+    }
 }

@@ -9,12 +9,19 @@ use rust_util::{information, print_ex, simple_error, util_term, warning, XResult
 use zeroize::Zeroize;
 
 use crate::consts::TINY_ENC_FILE_EXT;
+use crate::util_digest::DigestWrite;
 
 pub struct SecVec(pub Vec<u8>);
 
 impl Drop for SecVec {
     fn drop(&mut self) {
         self.0.zeroize()
+    }
+}
+
+impl AsRef<[u8]> for SecVec {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 
@@ -93,14 +100,13 @@ pub fn make_key256_and_nonce() -> (SecVec, SecVec) {
 }
 
 pub fn simple_kdf(input: &[u8]) -> Vec<u8> {
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    let input = hex::decode(sha256::digest(input)).unwrap();
-    hex::decode(sha256::digest(input)).unwrap()
+    let mut input = input.to_vec();
+    for _ in 0..8 {
+        let mut sha256 = DigestWrite::sha256();
+        sha256.write_all(&input).expect("SHOULD NOT HAPPEN");
+        input = sha256.digest();
+    }
+    input
 }
 
 pub fn decode_base64(input: &str) -> XResult<Vec<u8>> {
@@ -213,3 +219,14 @@ pub fn ratio(numerator: u64, denominator: u64) -> String {
     let r = (numerator * 10000) / denominator;
     format!("{:.2}", r as f64 / 100f64)
 }
+
+#[test]
+fn test_simple_kdf() {
+    assert_eq!("30edbc354e8cf656adcddbeefbf3f5073372cdc42e4eca2e797bda8abebb6a05",
+               hex::encode(simple_kdf(b"")));
+    assert_eq!("0624d2a57bcb50f70aa19bab9fa75af1ca66cc701c341df865d430e2e6d9d936",
+               hex::encode(simple_kdf(b"hello")));
+    assert_eq!("43367d255eddedc3c84b692b68de6d3d21da28caad6abd20ed85a4f2c89706ad",
+               hex::encode(simple_kdf(b"hello world")));
+}
+

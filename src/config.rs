@@ -53,10 +53,10 @@ impl TinyEncryptConfig {
     pub fn load(file: &str) -> XResult<Self> {
         let resolved_file = resolve_file_path(file);
         let config_contents = opt_result!(
-            fs::read_to_string(&resolved_file), "Read file: {}, failed: {}", file
+            fs::read_to_string(&resolved_file), "Read config file: {}, failed: {}", file
         );
         let mut config: TinyEncryptConfig = opt_result!(
-            serde_json::from_str(&config_contents),"Parse file: {}, failed: {}", file);
+            serde_json::from_str(&config_contents),"Parse config file: {}, failed: {}", file);
         let mut splited_profiles = HashMap::new();
         for (k, v) in config.profiles.into_iter() {
             if !k.contains(',') {
@@ -83,8 +83,7 @@ impl TinyEncryptConfig {
     }
 
     pub fn find_by_kid(&self, kid: &str) -> Option<&TinyEncryptConfigEnvelop> {
-        let config_envelops = self.find_by_kid_or_filter(kid, |_| false);
-        config_envelops.first().map(|e| *e)
+        self.find_by_kid_or_filter(kid, |_| false).first().copied()
     }
 
     pub fn find_by_kid_or_type(&self, k_filter: &str) -> Vec<&TinyEncryptConfigEnvelop> {
@@ -104,7 +103,8 @@ impl TinyEncryptConfig {
         }).collect()
     }
 
-    pub fn find_envelops(&self, profile: &Option<String>, key_filter: &Option<String>) -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
+    pub fn find_envelops(&self, profile: &Option<String>, key_filter: &Option<String>)
+                         -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
         debugging!("Profile: {:?}", profile);
         debugging!("Key filter: {:?}", key_filter);
         let mut matched_envelops_map = HashMap::new();
@@ -124,7 +124,7 @@ impl TinyEncryptConfig {
             });
         }
         if key_ids.is_empty() {
-            return simple_error!("Profile or key filter cannot find valid envelopes");
+            return simple_error!("Profile or key filter cannot find any valid envelopes");
         }
         for key_id in &key_ids {
             for envelop in self.find_by_kid_or_type(key_id) {
@@ -134,7 +134,7 @@ impl TinyEncryptConfig {
 
         let mut envelops: Vec<_> = matched_envelops_map.values().copied().collect();
         if envelops.is_empty() {
-            return simple_error!("Profile or key filter cannot find valid envelopes");
+            return simple_error!("Profile or key filter cannot find any valid envelopes");
         }
         envelops.sort_by(|e1, e2| {
             if e1.r#type < e2.r#type { return Ordering::Greater; }
