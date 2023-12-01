@@ -1,14 +1,15 @@
+use std::{env, fs};
+use std::env::temp_dir;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::{Instant, SystemTime};
 
 use clap::Args;
+use flate2::Compression;
 use openpgp_card::crypto_data::Cryptogram;
-use rust_util::{
-    debugging, failure, iff, information, opt_result, println_ex, simple_error, success,
-    util_msg, util_size, warning, XResult,
-};
+use rust_util::{debugging, failure, iff, information, opt_result, println_ex, simple_error, success, util_cmd, util_msg, util_size, util_time, warning, XResult};
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -16,7 +17,7 @@ use yubikey::piv::{AlgorithmId, decrypt_data};
 use yubikey::YubiKey;
 use zeroize::Zeroize;
 
-use crate::{consts, crypto_simple, util, util_enc_file, util_envelop, util_file, util_pgp, util_piv};
+use crate::{cmd_encrypt, consts, crypto_simple, util, util_enc_file, util_env, util_envelop, util_file, util_pgp, util_piv};
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
 use crate::consts::{
@@ -39,6 +40,9 @@ pub struct CmdDecrypt {
     /// PIN
     #[arg(long, short = 'p')]
     pub pin: Option<String>,
+    /// KeyID
+    #[arg(long, short = 'k')]
+    pub key_id: Option<String>,
     /// Slot
     #[arg(long, short = 's')]
     pub slot: Option<String>,
@@ -57,6 +61,9 @@ pub struct CmdDecrypt {
     /// Digest file
     #[arg(long, short = 'D')]
     pub digest_file: bool,
+    // Edit file
+    #[arg(long, short = 'E')]
+    pub edit_file: bool,
     /// Digest algorithm (sha1, sha256[default], sha384, sha512 ...)
     #[arg(long, short = 'A')]
     pub digest_algorithm: Option<String>,
@@ -77,18 +84,32 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     let mut succeed_count = 0;
     let mut failed_count = 0;
     let mut total_len = 0_u64;
+    if cmd_decrypt.edit_file && (cmd_decrypt.paths.len() != 1) {
+        return simple_error!("Edit mode only allows one file assigned.");
+    }
+    let pin = match &cmd_decrypt.pin {
+        Some(pin) => Some(pin.clone()),
+        None => util_env::get_pin(),
+    };
+    let key_id = match &cmd_decrypt.key_id {
+        Some(key_id) => Some(key_id.clone()),
+        None => util_env::get_key_id(),
+    };
+
     for path in &cmd_decrypt.paths {
         let start_decrypt_single = Instant::now();
-        match decrypt_single(&config, path, &cmd_decrypt.pin, &cmd_decrypt.slot, &cmd_decrypt) {
+        match decrypt_single(&config, path, &pin, &key_id, &cmd_decrypt.slot, &cmd_decrypt) {
             Ok(len) => {
                 succeed_count += 1;
-                total_len += len;
-                success!(
-                    "Decrypt {} succeed, cost {} ms, file size {}",
-                    path.to_str().unwrap_or("N/A"),
-                    start_decrypt_single.elapsed().as_millis(),
-                    util_size::get_display_size(len as i64)
-                );
+                if len > 0 {
+                    total_len += len;
+                    success!(
+                        "Decrypt {} succeed, cost {} ms, file size {}",
+                        path.to_str().unwrap_or("N/A"),
+                        start_decrypt_single.elapsed().as_millis(),
+                        util_size::get_display_size(len as i64)
+                    );
+                }
             }
             Err(e) => {
                 failed_count += 1;
@@ -111,13 +132,14 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
 pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
                       path: &PathBuf,
                       pin: &Option<String>,
+                      key_id: &Option<String>,
                       slot: &Option<String>,
                       cmd_decrypt: &CmdDecrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
     util::require_tiny_enc_file_and_exists(path)?;
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
-    let (_, meta) = opt_result!(
+    let (_, is_meta_compressed, meta) = opt_result!(
         util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display);
     util_msg::when_debug(|| {
         debugging!("Found meta: {}", serde_json::to_string_pretty(&meta).unwrap());
@@ -127,14 +149,15 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
         .unwrap_or(consts::TINY_ENC_AES_GCM);
     let cryptor = Cryptor::from(encryption_algorithm)?;
 
-    let do_skip_file_out = cmd_decrypt.skip_decrypt_file || cmd_decrypt.direct_print || cmd_decrypt.digest_file;
+    let do_skip_file_out = cmd_decrypt.skip_decrypt_file || cmd_decrypt.direct_print
+        || cmd_decrypt.digest_file || cmd_decrypt.edit_file;
     let path_out = &path_display[0..path_display.len() - TINY_ENC_FILE_EXT.len()];
     if !do_skip_file_out { util::require_file_not_exists(path_out)?; }
 
     let digest_algorithm = cmd_decrypt.digest_algorithm.as_deref().unwrap_or("sha256");
     if cmd_decrypt.digest_file { DigestWrite::from_algo(digest_algorithm)?; } // FAST CHECK
 
-    let selected_envelop = select_envelop(&meta, config)?;
+    let selected_envelop = select_envelop(&meta, key_id, config)?;
 
     let key = SecVec(try_decrypt_key(config, selected_envelop, pin, slot)?);
     let nonce = SecVec(opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}"));
@@ -148,27 +171,54 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
 
     // Decrypt to output
     if cmd_decrypt.direct_print {
-        if meta.file_length > 100 * 1024 {
-            failure!("File too large(more than 100K) cannot direct print on console.");
-            return Ok(0);
-        }
-        if meta.file_length > 10 * 1024 {
-            warning!("File is large(more than 10K) print on console.");
-        }
-
-        let mut output: Vec<u8> = Vec::with_capacity(10 * 1024);
-        let _ = decrypt_file(
-            &mut file_in, meta.file_length, &mut output, cryptor, &key_nonce, meta.compress,
-        )?;
-        match String::from_utf8(output) {
-            Err(_) => failure!("File content is not UTF-8 encoded."),
-            Ok(output) => if cmd_decrypt.split_print {
+        if let Some(output) = decrypt_limited_content_to_vec(&mut file_in, &meta, cryptor, &key_nonce)? {
+            if cmd_decrypt.split_print {
                 print!("{}", &output)
             } else {
                 println!(">>>>> BEGIN CONTENT >>>>>\n{}\n<<<<< END CONTENT <<<<<", &output)
             }
+            return Ok(meta.file_length);
         }
-        return Ok(meta.file_length);
+        return Ok(0);
+    }
+
+    // Edit file
+    if cmd_decrypt.edit_file {
+        let file_content = match decrypt_limited_content_to_vec(&mut file_in, &meta, cryptor, &key_nonce)? {
+            None => return Ok(0),
+            Some(output) => output,
+        };
+        let editor = get_file_editor();
+        let temp_file = create_edit_temp_file(&file_content, path_out)?;
+
+        let do_edit_file = || -> XResult<()> {
+            let temp_file_content = run_file_editor_and_wait_content(&editor, &temp_file)?;
+            if temp_file_content == file_content {
+                information!("Temp file is not changed.");
+                return Ok(());
+            }
+            success!("Temp file is changed, save file ...");
+            drop(file_in);
+            let mut meta = meta;
+            meta.file_length = temp_file_content.len() as u64;
+            meta.file_last_modified = util_time::get_current_millis() as u64;
+            let mut file_out = File::create(path)?;
+            let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &meta, is_meta_compressed)?;
+            let compress_level = iff!(meta.compress, Some(Compression::default().level()), None);
+            cmd_encrypt::encrypt_file(
+                &mut temp_file_content.as_bytes(), meta.file_length, &mut file_out, cryptor,
+                &key_nonce, &compress_level,
+            )?;
+            drop(file_out);
+
+            Ok(())
+        };
+        let do_edit_file_result = do_edit_file();
+        if let Err(e) = fs::remove_file(&temp_file) {
+            warning!("Remove temp file: {} failed: {}", temp_file.display(), e)
+        }
+        do_edit_file_result?;
+        return Ok(0);
     }
 
     // Digest file
@@ -210,7 +260,59 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     Ok(meta.file_length)
 }
 
-fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
+fn run_file_editor_and_wait_content(editor: &str, temp_file: &PathBuf) -> XResult<String> {
+    let mut command = Command::new(editor);
+    command.arg(temp_file.to_str().expect("Get temp file path failed."));
+    let run_cmd_result = util_cmd::run_command_and_wait(&mut command);
+    debugging!("Run cmd result: {:?}", run_cmd_result);
+    let run_cmd_exit_status = opt_result!(run_cmd_result, "Run cmd {} failed: {}", editor);
+    if !run_cmd_exit_status.success() {
+        return simple_error!("Run cmd {} failed: {:?}", editor, run_cmd_exit_status.code());
+    }
+    Ok(opt_result!(fs::read_to_string(&temp_file), "Read file failed: {}"))
+}
+
+fn get_file_editor() -> String {
+    match env::var("EDITOR") {
+        Ok(editor) => editor,
+        Err(_) => {
+            warning!("EDITOR is not assigned, use default editor vi");
+            "vi".to_string()
+        }
+    }
+}
+
+fn create_edit_temp_file(file_content: &str, path_out: &str) -> XResult<PathBuf> {
+    let temp_dir = temp_dir();
+    let current_millis = util_time::get_current_millis();
+    let temp_file = temp_dir.join(&format!("tmp_file_{}_{}", current_millis, path_out));
+    information!("Temp file: {}", temp_file.display());
+    opt_result!(fs::write(&temp_file, file_content), "Write temp file failed: {}");
+    Ok(temp_file)
+}
+
+fn decrypt_limited_content_to_vec(mut file_in: &mut File,
+                                  meta: &TinyEncryptMeta, cryptor: Cryptor, key_nonce: &KeyNonce) -> XResult<Option<String>> {
+    if meta.file_length > 100 * 1024 {
+        failure!("File too large(more than 100K) cannot direct print on console.");
+        return Ok(None);
+    }
+    if meta.file_length > 10 * 1024 {
+        warning!("File is large(more than 10K) print on console.");
+    }
+
+    let mut output: Vec<u8> = Vec::with_capacity(10 * 1024);
+    let _ = decrypt_file(
+        &mut file_in, meta.file_length, &mut output, cryptor, &key_nonce, meta.compress,
+    )?;
+    match String::from_utf8(output) {
+        Err(_) => failure!("File content is not UTF-8 encoded."),
+        Ok(output) => return Ok(Some(output)),
+    }
+    return Ok(None);
+}
+
+fn decrypt_file(file_in: &mut impl Read, file_len: u64, file_out: &mut impl Write,
                 cryptor: Cryptor, key_nonce: &KeyNonce, compress: bool) -> XResult<u64> {
     let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
@@ -378,7 +480,7 @@ fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XR
     Ok(key)
 }
 
-fn select_envelop<'a>(meta: &'a TinyEncryptMeta, config: &Option<TinyEncryptConfig>) -> XResult<&'a TinyEncryptEnvelop> {
+fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, config: &Option<TinyEncryptConfig>) -> XResult<&'a TinyEncryptEnvelop> {
     let envelops = match &meta.envelops {
         None => return simple_error!("No envelops found"),
         Some(envelops) => if envelops.is_empty() {
@@ -394,6 +496,25 @@ fn select_envelop<'a>(meta: &'a TinyEncryptMeta, config: &Option<TinyEncryptConf
         success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, config));
         util::read_line("Press enter to continue: ");
         return Ok(selected_envelop);
+    }
+
+    if let Some(key_id) = key_id {
+        for envelop in envelops {
+            let is_sid_matched = match config {
+                None => false,
+                Some(config) => match config.find_by_kid(&envelop.kid) {
+                    None => false,
+                    Some(config) => match &config.sid {
+                        None => false,
+                        Some(sid) => sid == key_id,
+                    },
+                }
+            };
+            if is_sid_matched || (&envelop.kid == key_id) {
+                information!("Matched envelop: {}", util_envelop::format_envelop(envelop, config));
+                return Ok(envelop);
+            }
+        }
     }
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {

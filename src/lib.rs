@@ -1,7 +1,10 @@
 pub use cmd_config::CmdConfig;
 pub use cmd_config::config;
+#[cfg(feature = "smartcard")]
 pub use cmd_decrypt::CmdDecrypt;
+#[cfg(feature = "smartcard")]
 pub use cmd_decrypt::decrypt;
+#[cfg(feature = "smartcard")]
 pub use cmd_decrypt::decrypt_single;
 pub use cmd_directdecrypt::CmdDirectDecrypt;
 pub use cmd_directdecrypt::direct_decrypt;
@@ -20,7 +23,9 @@ mod util;
 mod util_env;
 mod util_digest;
 mod util_progress;
+#[cfg(feature = "smartcard")]
 mod util_piv;
+#[cfg(feature = "smartcard")]
 mod util_pgp;
 mod util_p256;
 mod util_p384;
@@ -38,6 +43,7 @@ mod util_enc_file;
 mod cmd_version;
 mod cmd_config;
 mod cmd_info;
+#[cfg(feature = "smartcard")]
 mod cmd_decrypt;
 mod cmd_encrypt;
 mod cmd_directdecrypt;

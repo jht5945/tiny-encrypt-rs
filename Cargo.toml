@@ -1,12 +1,16 @@
 [package]
 name = "tiny-encrypt"
-version = "0.7.0"
+version = "0.8.1"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
 repository = "https://git.hatter.ink/hatter/tiny-encrypt-rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["smartcard"]
+smartcard = ["openpgp-card", "openpgp-card-pcsc", "yubikey"]
 
 [dependencies]
 aes-gcm-stream = "0.2"
@@ -18,25 +22,24 @@ flate2 = "1.0"
 fs-set-times = "0.20"
 hex = "0.4"
 indicatif = "0.17"
-openpgp-card = "0.3"
-openpgp-card-pcsc = "0.3"
+openpgp-card = { version = "0.3", optional = true }
+openpgp-card-pcsc = { version = "0.3", optional = true }
 p256 = { version = "0.13", features = ["pem", "ecdh", "pkcs8"] }
 p384 = { version = "0.13", features = ["pem", "ecdh", "pkcs8"] }
 rand = "0.8"
 # reqwest = { version = "0.11", features = ["blocking", "rustls", "rustls-tls"] }
-rpassword = "7.2"
+rpassword = "7.3"
 rsa = { version = "0.9", features = ["pem"] }
 rust-crypto = "0.2"
 rust_util = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sha256 = "1.4"
 simpledateformat = "0.1"
 tabled = "0.14"
 x25519-dalek = "2.0"
 x509-parser = "0.15"
-yubikey = { version = "0.8", features = ["untested"] }
-zeroize = "1.6"
+yubikey = { version = "0.8", features = ["untested"], optional = true }
+zeroize = "1.7"
 
 [patch.crates-io]
 rust-crypto = { git = "https://github.com/jht5945/rust-crypto.git" }

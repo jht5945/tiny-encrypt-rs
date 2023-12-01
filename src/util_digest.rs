@@ -45,6 +45,14 @@ impl DigestWrite {
     }
 }
 
+pub fn sha256_digest(input: &[u8]) -> Vec<u8> {
+    let mut digest = Sha256::new();
+    digest.input(input);
+    let mut buf: Vec<u8> = repeat(0).take((digest.output_bits() + 7) / 8).collect();
+    digest.result(&mut buf);
+    buf
+}
+
 fn get_digest_by_algorithm(algo: &str) -> Option<Box<dyn Digest>> {
     let algo = algo.to_uppercase();
     match algo.as_str() {

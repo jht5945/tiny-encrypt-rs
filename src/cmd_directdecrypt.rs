@@ -8,22 +8,22 @@ use clap::Args;
 use rust_util::{debugging, information, opt_result, simple_error, success, warning, XResult};
 use zeroize::Zeroize;
 
+use crate::{util, util_digest};
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
-use crate::util;
 use crate::util_progress::Progress;
 
 #[derive(Debug, Args)]
 pub struct CmdDirectDecrypt {
-    /// Files in
+    /// File input
     #[arg(long, short = 'i')]
     pub file_in: PathBuf,
-    /// Files output
+    /// File output
     #[arg(long, short = 'o')]
     pub file_out: PathBuf,
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
-    /// Key in HEX
+    /// Key in HEX (32 bytes)
     #[arg(long, short = 'k')]
     pub key: String,
 }
@@ -36,12 +36,14 @@ impl Drop for CmdDirectDecrypt {
 
 const DIRECT_ENCRYPT_MAGIC: &str = "e2c50001";
 
-// Format
-// [4 bytes] - magic 0xe2c50001
+// Direct decrypt file format:
+// [4 bytes] - magic 0xe2 0xc5 0x00 0x01
 // [32 bytes] - key digest
 // [12 bytes] - nonce
+// [n bytes] - ciphertext
+// [16 bytes] - tag
 pub fn direct_decrypt(cmd_direct_decrypt: CmdDirectDecrypt) -> XResult<()> {
-    let key = opt_result!(hex::decode(&cmd_direct_decrypt.key), "Parse key failed: {}");
+    let key = opt_result!(hex::decode(&cmd_direct_decrypt.key), "Parse encryption key failed: {}");
     if key.len() != 32 {
         return simple_error!("Key length error, must be AES256.");
     }
@@ -55,13 +57,14 @@ pub fn direct_decrypt(cmd_direct_decrypt: CmdDirectDecrypt) -> XResult<()> {
     let mut magic = [0_u8; 4];
     opt_result!(file_in.read_exact(&mut magic), "Read magic failed: {}");
     if hex::encode(magic) != DIRECT_ENCRYPT_MAGIC {
-        return simple_error!("File magic mismatch.");
+        return simple_error!("In file magic mismatch.");
     }
     let mut key_digest = [0_u8; 32];
-    opt_result!(file_in.read_exact(&mut key_digest), "Read key digest failed: {}");
-    if sha256::digest(&key) != hex::encode(key_digest) {
-        debugging!("Key digest mismatch: {} vs {}", sha256::digest(&key), hex::encode(key_digest));
-        return simple_error!("Key digest mismatch.");
+    opt_result!(file_in.read_exact(&mut key_digest), "Read encryption key digest failed: {}");
+    if hex::encode(util_digest::sha256_digest(&key)) != hex::encode(key_digest) {
+        debugging!("Encryption key digest mismatch: {} vs {}",
+            hex::encode(util_digest::sha256_digest(&key)), hex::encode(key_digest));
+        return simple_error!("Encryption key digest mismatch.");
     }
     let mut nonce = [0_u8; 12];
     opt_result!(file_in.read_exact(&mut nonce), "Read nonce failed: {}");
@@ -94,25 +97,24 @@ pub fn direct_decrypt(cmd_direct_decrypt: CmdDirectDecrypt) -> XResult<()> {
     Ok(())
 }
 
-
-fn decrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write,
+fn decrypt_file(file_in: &mut impl Read, file_len: u64, file_out: &mut impl Write,
                 cryptor: Cryptor, key_nonce: &KeyNonce) -> XResult<u64> {
     let mut total_len = 0_u64;
     let mut buffer = [0u8; 1024 * 8];
     let progress = Progress::new(file_len);
     let mut decryptor = cryptor.decryptor(key_nonce)?;
     loop {
-        let len = opt_result!(file_in.read(&mut buffer), "Read file failed: {}");
+        let len = opt_result!(file_in.read(&mut buffer), "Read in file failed: {}");
         if len == 0 {
-            let last_block = opt_result!(decryptor.finalize(), "Decrypt file failed: {}");
-            opt_result!(file_out.write_all(&last_block), "Write file failed: {}");
+            let last_block = opt_result!(decryptor.finalize(), "Decrypt in file failed: {}");
+            opt_result!(file_out.write_all(&last_block), "Write out file failed: {}");
             progress.finish();
             debugging!("Decrypt finished, total: {} byte(s)", total_len);
             break;
         } else {
             total_len += len as u64;
             let decrypted = decryptor.update(&buffer[0..len]);
-            opt_result!(file_out.write_all(&decrypted), "Write file failed: {}");
+            opt_result!(file_out.write_all(&decrypted), "Write out file failed: {}");
             progress.position(total_len);
         }
     }

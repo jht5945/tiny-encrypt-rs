@@ -7,10 +7,15 @@ use crate::util;
 pub struct CmdVersion {}
 
 pub fn version(_cmd_version: CmdVersion) -> XResult<()> {
+    let mut features: Vec<&str> = vec![];
+    #[cfg(feature = "smartcard")]
+    features.push("smartcard");
+    if features.is_empty() { features.push("-"); }
     println!(
-        "User-Agent: {}\n{}",
+        "User-Agent: {} [ with features: {} ]\n{}",
         util::get_user_agent(),
-        env!("CARGO_PKG_DESCRIPTION"),
+        features.join(", "),
+        env!("CARGO_PKG_DESCRIPTION")
     );
     Ok(())
 }

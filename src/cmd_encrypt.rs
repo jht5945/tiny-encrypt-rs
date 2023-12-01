@@ -184,8 +184,8 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
     Ok(file_metadata.len())
 }
 
-fn encrypt_file(file_in: &mut File, file_len: u64, file_out: &mut impl Write, cryptor: Cryptor,
-                key_nonce: &KeyNonce, compress_level: &Option<u32>) -> XResult<u64> {
+pub(crate) fn encrypt_file(file_in: &mut impl Read, file_len: u64, file_out: &mut impl Write, cryptor: Cryptor,
+                           key_nonce: &KeyNonce, compress_level: &Option<u32>) -> XResult<u64> {
     let compress = compress_level.is_some();
     let mut total_len = 0_u64;
     let mut write_len = 0_u64;

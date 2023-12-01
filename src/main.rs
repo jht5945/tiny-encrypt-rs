@@ -3,7 +3,9 @@ extern crate core;
 use clap::{Parser, Subcommand};
 use rust_util::XResult;
 
-use tiny_encrypt::{CmdConfig, CmdDecrypt, CmdDirectDecrypt, CmdEncrypt, CmdInfo, CmdVersion};
+use tiny_encrypt::{CmdConfig, CmdDirectDecrypt, CmdEncrypt, CmdInfo, CmdVersion};
+#[cfg(feature = "smartcard")]
+use tiny_encrypt::CmdDecrypt;
 
 #[derive(Debug, Parser)]
 #[command(name = "tiny-encrypt-rs")]
@@ -18,6 +20,7 @@ enum Commands {
     /// Encrypt file(s)
     #[command(arg_required_else_help = true, short_flag = 'e')]
     Encrypt(CmdEncrypt),
+    #[cfg(feature = "smartcard")]
     /// Decrypt file(s)
     #[command(arg_required_else_help = true, short_flag = 'd')]
     Decrypt(CmdDecrypt),
@@ -39,6 +42,7 @@ fn main() -> XResult<()> {
     let args = Cli::parse();
     match args.command {
         Commands::Encrypt(cmd_encrypt) => tiny_encrypt::encrypt(cmd_encrypt),
+        #[cfg(feature = "smartcard")]
         Commands::Decrypt(cmd_decrypt) => tiny_encrypt::decrypt(cmd_decrypt),
         Commands::DirectDecrypt(cmd_direct_decrypt) => tiny_encrypt::direct_decrypt(cmd_direct_decrypt),
         Commands::Info(cmd_info) => tiny_encrypt::info(cmd_info),

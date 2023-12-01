@@ -19,6 +19,11 @@ Set default encryption algorithm:
 export TINY_ENCRYPT_DEFAULT_ALGORITHM='AES' # or CHACHA20
 ```
 
+Compile only encrypt:
+```shell
+cargo build --release --no-default-features
+```
+
 <br>
 
 Encrypt config `~/.tinyencrypt/config-rs.json`:

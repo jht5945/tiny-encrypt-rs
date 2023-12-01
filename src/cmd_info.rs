@@ -46,7 +46,7 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
     let file_in_len = file_in.metadata().map(|m| m.len()).unwrap_or(0);
 
-    let (meta_len, meta) = opt_result!(
+    let (meta_len, _, meta) = opt_result!(
         util_enc_file::read_tiny_encrypt_meta_and_normalize(&mut file_in), "Read file: {}, failed: {}", &path_display
     );
 

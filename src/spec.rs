@@ -1,6 +1,5 @@
 use std::fs::Metadata;
 
-use flate2::Compression;
 use rust_util::{opt_result, util_time, XResult};
 use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
@@ -65,16 +64,22 @@ pub struct TinyEncryptEnvelop {
 /// NOTICE: Kms and Age is not being supported in the future
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub enum TinyEncryptEnvelopType {
+    // OpenPGP RSA
     #[serde(rename = "pgp")]
     Pgp,
+    // OpenPGP X25519
     #[serde(rename = "pgp-x25519")]
     PgpX25519,
+    // Age, tiny-encrypt-rs is not supported
     #[serde(rename = "age")]
     Age,
+    // ECDH P256
     #[serde(rename = "ecdh")]
     Ecdh,
+    // ECDH P384
     #[serde(rename = "ecdh-p384")]
     EcdhP384,
+    // KMS, tiny-encrypt-rs is not supported
     #[serde(rename = "kms")]
     Kms,
 }
@@ -118,7 +123,7 @@ impl EncEncryptedMeta {
     pub fn seal(&self, crypto: Cryptor, key_nonce: &KeyNonce) -> XResult<Vec<u8>> {
         let mut encrypted_meta_json = serde_json::to_vec(self).unwrap();
         encrypted_meta_json = opt_result!(
-            compress::compress(Compression::default(), &encrypted_meta_json), "Compress encrypted meta failed: {}");
+            compress::compress_default(&encrypted_meta_json), "Compress encrypted meta failed: {}");
         let encrypted = opt_result!(crypto_simple::encrypt_with_salt(
                 crypto, key_nonce, SALT_META, encrypted_meta_json.as_slice()), "Encrypt encrypted meta failed: {}");
         Ok(encrypted)

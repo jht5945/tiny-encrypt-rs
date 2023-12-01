@@ -1,6 +1,7 @@
 use rust_util::XResult;
 
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
+use crate::util_digest;
 
 pub fn try_decrypt_with_salt(crypto: Cryptor, key_nonce: &KeyNonce, salt: &[u8], message: &[u8]) -> XResult<Vec<u8>> {
     let new_nonce = build_salted_nonce(key_nonce.n, salt);
@@ -28,6 +29,7 @@ pub fn encrypt(crypto: Cryptor, key_nonce: &KeyNonce, message: &[u8]) -> XResult
 fn build_salted_nonce(nonce: &[u8], salt: &[u8]) -> Vec<u8> {
     let mut nonce_with_salt = nonce.to_vec();
     nonce_with_salt.extend_from_slice(salt);
-    let input = hex::decode(sha256::digest(nonce_with_salt)).unwrap();
+    let input = util_digest::sha256_digest(&nonce_with_salt);
+    // let input = hex::decode(sha256::digest(nonce_with_salt)).unwrap();
     input[0..12].to_vec()
 }

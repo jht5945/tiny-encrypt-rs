@@ -8,6 +8,8 @@ use crate::consts;
 pub const TINY_ENCRYPT_ENV_DEFAULT_ALGORITHM: &str = "TINY_ENCRYPT_DEFAULT_ALGORITHM";
 pub const TINY_ENCRYPT_ENV_DEFAULT_COMPRESS: &str = "TINY_ENCRYPT_DEFAULT_COMPRESS";
 pub const TINY_ENCRYPT_ENV_NO_PROGRESS: &str = "TINY_ENCRYPT_NO_PROGRESS";
+pub const TINY_ENCRYPT_ENV_PIN: &str = "TINY_ENCRYPT_PIN";
+pub const TINY_ENCRYPT_ENV_KEY_ID: &str = "TINY_ENCRYPT_KEY_ID";
 
 pub fn get_default_encryption_algorithm() -> Option<&'static str> {
     let env_default_algorithm = env::var(TINY_ENCRYPT_ENV_DEFAULT_ALGORITHM).ok();
@@ -21,6 +23,14 @@ pub fn get_default_encryption_algorithm() -> Option<&'static str> {
         }
     }
     None
+}
+
+pub fn get_pin() -> Option<String> {
+    env::var(TINY_ENCRYPT_ENV_PIN).ok()
+}
+
+pub fn get_key_id() -> Option<String> {
+    env::var(TINY_ENCRYPT_ENV_KEY_ID).ok()
 }
 
 pub fn get_default_compress() -> Option<bool> {
