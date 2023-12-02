@@ -48,6 +48,7 @@ pub struct TinyEncryptMeta {
     pub nonce: String,
     pub file_length: u64,
     pub file_last_modified: u64,
+    pub file_edit_count: Option<u64>,
     pub compress: bool,
 }
 
@@ -161,6 +162,7 @@ impl TinyEncryptMeta {
                 Ok(modified) => get_millis(&modified) as u64,
                 Err(_) => 0,
             },
+            file_edit_count: None,
             compress: enc_metadata.compress,
         }
     }

@@ -80,15 +80,21 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     let now_millis = util_time::get_current_millis() as u64;
     let fmt = simpledateformat::fmt(DATE_TIME_FORMAT).unwrap();
     infos.push(format!("{}: {}, {} ago",
-                       header("Last modified"),
-                       fmt.format_local(SystemTime::from_millis(meta.file_last_modified)),
-                       format_human2(Duration::from_millis(now_millis - meta.file_last_modified))
-    ));
-    infos.push(format!("{}: {}, {} ago",
                        header("Created"),
                        fmt.format_local(SystemTime::from_millis(meta.created)),
                        format_human2(Duration::from_millis(now_millis - meta.created))
     ));
+    infos.push(format!("{}: {}, {} ago",
+                       header("Last modified"),
+                       fmt.format_local(SystemTime::from_millis(meta.file_last_modified)),
+                       format_human2(Duration::from_millis(now_millis - meta.file_last_modified))
+    ));
+    if let Some(file_edit_count) = meta.file_edit_count {
+        infos.push(format!("{}: {} time(s)",
+                           header("Edit count"),
+                           file_edit_count
+        ));
+    }
 
     if let Some(envelops) = meta.envelops.as_ref() {
         envelops.iter().enumerate().for_each(|(i, envelop)| {

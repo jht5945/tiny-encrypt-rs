@@ -24,6 +24,18 @@ Compile only encrypt:
 cargo build --release --no-default-features
 ```
 
+Edit encrypted file:
+```shell
+tiny-encrypt decrypt --edit-file sample.txt.tinyenc 
+```
+Read environment `EDITOR` or `SECURE_EDITOR` to edit file, `SECURE_EDITOR` write encrypted file to temp file.
+
+Secure editor command format:
+```shell
+$SECURE_EDITOR <temp-file-name> "aes-256-gcm" <temp-key-hex> <temp-nonce-hex>
+```
+
+
 <br>
 
 Encrypt config `~/.tinyencrypt/config-rs.json`:

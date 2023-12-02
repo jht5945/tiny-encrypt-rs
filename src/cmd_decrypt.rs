@@ -188,11 +188,27 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
             None => return Ok(0),
             Some(output) => output,
         };
-        let editor = get_file_editor();
-        let temp_file = create_edit_temp_file(&file_content, path_out)?;
+        let (secure_editor, editor) = get_file_editor();
+        let temp_cryptor = Cryptor::Aes256Gcm;
+        let temp_encryption_key_nonce = util::make_key256_and_nonce();
+        let temp_key_nonce = KeyNonce { k: temp_encryption_key_nonce.0.as_ref(), n: temp_encryption_key_nonce.1.as_ref() };
+        let write_file_content = if secure_editor {
+            let mut encryptor = temp_cryptor.encryptor(&temp_key_nonce)?;
+            encryptor.encrypt(file_content.as_bytes())
+        } else {
+            file_content.as_bytes().to_vec()
+        };
+        let temp_file = create_edit_temp_file(&write_file_content, path_out)?;
 
         let do_edit_file = || -> XResult<()> {
-            let temp_file_content = run_file_editor_and_wait_content(&editor, &temp_file)?;
+            let temp_file_content_bytes = run_file_editor_and_wait_content(&editor, &temp_file, secure_editor, &temp_encryption_key_nonce)?;
+            let temp_file_content_bytes = if secure_editor {
+                let mut decryptor = temp_cryptor.decryptor(&temp_key_nonce)?;
+                decryptor.decrypt(&temp_file_content_bytes)?
+            } else {
+                temp_file_content_bytes
+            };
+            let temp_file_content = opt_result!(String::from_utf8(temp_file_content_bytes), "Read temp file failed: {}");
             if temp_file_content == file_content {
                 information!("Temp file is not changed.");
                 return Ok(());
@@ -202,6 +218,10 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
             let mut meta = meta;
             meta.file_length = temp_file_content.len() as u64;
             meta.file_last_modified = util_time::get_current_millis() as u64;
+            match &mut meta.file_edit_count {
+                None => { meta.file_edit_count = Some(1); }
+                Some(file_edit_count) => { *file_edit_count += 1; }
+            }
             let mut file_out = File::create(path)?;
             let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &meta, is_meta_compressed)?;
             let compress_level = iff!(meta.compress, Some(Compression::default().level()), None);
@@ -260,32 +280,43 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     Ok(meta.file_length)
 }
 
-fn run_file_editor_and_wait_content(editor: &str, temp_file: &PathBuf) -> XResult<String> {
+fn run_file_editor_and_wait_content(editor: &str, temp_file: &PathBuf, secure_editor: bool, temp_encryption_key_nonce: &(SecVec, SecVec)) -> XResult<Vec<u8>> {
     let mut command = Command::new(editor);
     command.arg(temp_file.to_str().expect("Get temp file path failed."));
+    if secure_editor {
+        command.arg("aes-256-gcm");
+        command.arg(&hex::encode(&temp_encryption_key_nonce.0));
+        command.arg(&hex::encode(&temp_encryption_key_nonce.1));
+    }
+    debugging!("Run cmd: {:?}", command);
     let run_cmd_result = util_cmd::run_command_and_wait(&mut command);
     debugging!("Run cmd result: {:?}", run_cmd_result);
     let run_cmd_exit_status = opt_result!(run_cmd_result, "Run cmd {} failed: {}", editor);
     if !run_cmd_exit_status.success() {
         return simple_error!("Run cmd {} failed: {:?}", editor, run_cmd_exit_status.code());
     }
-    Ok(opt_result!(fs::read_to_string(&temp_file), "Read file failed: {}"))
+    Ok(opt_result!(fs::read(temp_file), "Read file failed: {}"))
 }
 
-fn get_file_editor() -> String {
-    match env::var("EDITOR") {
-        Ok(editor) => editor,
-        Err(_) => {
+fn get_file_editor() -> (bool, String) {
+    if let Ok(secure_editor) = env::var("SECURE_EDITOR") {
+        // cmd <file-name> "aes-256-gcm" <key-in-hex> <nonce-in-hex>
+        information!("Found secure editor: {}", &secure_editor);
+        return (true, secure_editor);
+    }
+    match env::var("EDITOR").ok() {
+        Some(editor) => (false, editor),
+        None => {
             warning!("EDITOR is not assigned, use default editor vi");
-            "vi".to_string()
+            (false, "vi".to_string())
         }
     }
 }
 
-fn create_edit_temp_file(file_content: &str, path_out: &str) -> XResult<PathBuf> {
+fn create_edit_temp_file(file_content: &[u8], path_out: &str) -> XResult<PathBuf> {
     let temp_dir = temp_dir();
     let current_millis = util_time::get_current_millis();
-    let temp_file = temp_dir.join(&format!("tmp_file_{}_{}", current_millis, path_out));
+    let temp_file = temp_dir.join(format!("tmp_file_{}_{}", current_millis, path_out));
     information!("Temp file: {}", temp_file.display());
     opt_result!(fs::write(&temp_file, file_content), "Write temp file failed: {}");
     Ok(temp_file)
@@ -303,13 +334,13 @@ fn decrypt_limited_content_to_vec(mut file_in: &mut File,
 
     let mut output: Vec<u8> = Vec::with_capacity(10 * 1024);
     let _ = decrypt_file(
-        &mut file_in, meta.file_length, &mut output, cryptor, &key_nonce, meta.compress,
+        &mut file_in, meta.file_length, &mut output, cryptor, key_nonce, meta.compress,
     )?;
     match String::from_utf8(output) {
         Err(_) => failure!("File content is not UTF-8 encoded."),
         Ok(output) => return Ok(Some(output)),
     }
-    return Ok(None);
+    Ok(None)
 }
 
 fn decrypt_file(file_in: &mut impl Read, file_len: u64, file_out: &mut impl Write,
@@ -491,30 +522,15 @@ fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, config
     };
 
     success!("Found {} envelops:", envelops.len());
+    if let Some(envelop) = match_envelop_by_key_id(envelops, key_id, config) {
+        return Ok(envelop);
+    }
+
     if envelops.len() == 1 {
         let selected_envelop = &envelops[0];
         success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, config));
         util::read_line("Press enter to continue: ");
         return Ok(selected_envelop);
-    }
-
-    if let Some(key_id) = key_id {
-        for envelop in envelops {
-            let is_sid_matched = match config {
-                None => false,
-                Some(config) => match config.find_by_kid(&envelop.kid) {
-                    None => false,
-                    Some(config) => match &config.sid {
-                        None => false,
-                        Some(sid) => sid == key_id,
-                    },
-                }
-            };
-            if is_sid_matched || (&envelop.kid == key_id) {
-                information!("Matched envelop: {}", util_envelop::format_envelop(envelop, config));
-                return Ok(envelop);
-            }
-        }
     }
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {
@@ -525,4 +541,22 @@ fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, config
     let selected_envelop = &envelops[envelop_number - 1];
     success!("Selected envelop: #{} {}", envelop_number, selected_envelop.r#type.get_upper_name());
     Ok(selected_envelop)
+}
+
+fn match_envelop_by_key_id<'a>(envelops: &'a Vec<TinyEncryptEnvelop>, key_id: &Option<String>, config: &Option<TinyEncryptConfig>) -> Option<&'a TinyEncryptEnvelop> {
+    if let Some(key_id) = key_id {
+        for envelop in envelops {
+            let is_sid_matched = config.as_ref().and_then(|config| {
+                config.find_by_kid(&envelop.kid).and_then(|config_envelop| {
+                    config_envelop.sid.as_ref().map(|sid| sid == key_id)
+                })
+            }).unwrap_or(false);
+
+            if is_sid_matched || (&envelop.kid == key_id) {
+                information!("Matched envelop: {}", util_envelop::format_envelop(envelop, config));
+                return Some(envelop);
+            }
+        }
+    }
+    None
 }
