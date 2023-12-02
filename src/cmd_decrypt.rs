@@ -87,14 +87,8 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     if cmd_decrypt.edit_file && (cmd_decrypt.paths.len() != 1) {
         return simple_error!("Edit mode only allows one file assigned.");
     }
-    let pin = match &cmd_decrypt.pin {
-        Some(pin) => Some(pin.clone()),
-        None => util_env::get_pin(),
-    };
-    let key_id = match &cmd_decrypt.key_id {
-        Some(key_id) => Some(key_id.clone()),
-        None => util_env::get_key_id(),
-    };
+    let pin = cmd_decrypt.pin.clone().or_else(util_env::get_pin);
+    let key_id = cmd_decrypt.key_id.clone().or_else(util_env::get_key_id);
 
     for path in &cmd_decrypt.paths {
         let start_decrypt_single = Instant::now();
@@ -322,8 +316,8 @@ fn create_edit_temp_file(file_content: &[u8], path_out: &str) -> XResult<PathBuf
     Ok(temp_file)
 }
 
-fn decrypt_limited_content_to_vec(mut file_in: &mut File,
-                                  meta: &TinyEncryptMeta, cryptor: Cryptor, key_nonce: &KeyNonce) -> XResult<Option<String>> {
+pub fn decrypt_limited_content_to_vec(mut file_in: &mut File,
+                                      meta: &TinyEncryptMeta, cryptor: Cryptor, key_nonce: &KeyNonce) -> XResult<Option<String>> {
     if meta.file_length > 100 * 1024 {
         failure!("File too large(more than 100K) cannot direct print on console.");
         return Ok(None);
@@ -420,10 +414,10 @@ fn parse_encrypted_meta(meta: &TinyEncryptMeta, cryptor: Cryptor, key_nonce: &Ke
     Ok(Some(enc_meta))
 }
 
-fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
-                   envelop: &TinyEncryptEnvelop,
-                   pin: &Option<String>,
-                   slot: &Option<String>) -> XResult<Vec<u8>> {
+pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
+                       envelop: &TinyEncryptEnvelop,
+                       pin: &Option<String>,
+                       slot: &Option<String>) -> XResult<Vec<u8>> {
     match envelop.r#type {
         TinyEncryptEnvelopType::Pgp => try_decrypt_key_pgp(envelop, pin),
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
@@ -511,7 +505,7 @@ fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XR
     Ok(key)
 }
 
-fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, config: &Option<TinyEncryptConfig>) -> XResult<&'a TinyEncryptEnvelop> {
+pub fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, config: &Option<TinyEncryptConfig>) -> XResult<&'a TinyEncryptEnvelop> {
     let envelops = match &meta.envelops {
         None => return simple_error!("No envelops found"),
         Some(envelops) => if envelops.is_empty() {

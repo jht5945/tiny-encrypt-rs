@@ -17,6 +17,13 @@ pub use cmd_info::info;
 pub use cmd_info::info_single;
 pub use cmd_version::CmdVersion;
 pub use cmd_version::version;
+#[cfg(feature = "macos")]
+pub use cmd_initkeychainkey::CmdKeychainKey;
+#[cfg(feature = "macos")]
+pub use cmd_initkeychainkey::keychain_key;
+pub use cmd_execenv::CmdExecEnv;
+pub use cmd_execenv::exec_env;
+
 
 mod consts;
 mod util;
@@ -47,4 +54,7 @@ mod cmd_info;
 mod cmd_decrypt;
 mod cmd_encrypt;
 mod cmd_directdecrypt;
+#[cfg(feature = "macos")]
+mod cmd_initkeychainkey;
+mod cmd_execenv;
 

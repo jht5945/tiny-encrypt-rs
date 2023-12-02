@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "0.9.0"
+version = "1.0.0"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -9,8 +9,9 @@ repository = "https://git.hatter.ink/hatter/tiny-encrypt-rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["smartcard"]
+default = ["smartcard", "macos"]
 smartcard = ["openpgp-card", "openpgp-card-pcsc", "yubikey"]
+macos = ["security-framework"]
 
 [dependencies]
 aes-gcm-stream = "0.2"
@@ -32,6 +33,7 @@ rpassword = "7.3"
 rsa = { version = "0.9", features = ["pem"] }
 rust-crypto = "0.2"
 rust_util = "0.6"
+security-framework = { version = "2.9.2", features = ["OSX_10_15"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 simpledateformat = "0.1"
