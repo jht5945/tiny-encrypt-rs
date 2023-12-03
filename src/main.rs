@@ -38,7 +38,7 @@ enum Commands {
     KeychainKey(CmdKeychainKey),
     /// Execute env
     #[command(arg_required_else_help = true, short_flag = 'X')]
-    CmdExecEnv(CmdExecEnv),
+    ExecEnv(CmdExecEnv),
     /// Show version
     #[command(short_flag = 'v')]
     Version(CmdVersion),
@@ -57,7 +57,7 @@ fn main() -> XResult<()> {
         Commands::Info(cmd_info) => tiny_encrypt::info(cmd_info),
         #[cfg(feature = "macos")]
         Commands::KeychainKey(cmd_keychain_key) => tiny_encrypt::keychain_key(cmd_keychain_key),
-        Commands::CmdExecEnv(cmd_exec_env) => tiny_encrypt::exec_env(cmd_exec_env),
+        Commands::ExecEnv(cmd_exec_env) => tiny_encrypt::exec_env(cmd_exec_env),
         Commands::Version(cmd_version) => tiny_encrypt::version(cmd_version),
         Commands::Config(cmd_config) => tiny_encrypt::config(cmd_config),
     }

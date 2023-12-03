@@ -52,6 +52,9 @@ pub struct CmdEncrypt {
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
+    /// Create file
+    #[arg(long)]
+    pub create: bool,
     /// Disable compress meta
     #[arg(long)]
     pub disable_compress_meta: bool,
@@ -112,7 +115,15 @@ pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
 pub fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
     let path_out = format!("{}{}", path_display, TINY_ENC_FILE_EXT);
-    encrypt_single_file_out(path, &path_out, envelops, cmd_encrypt)
+    let encrypt_single_result = encrypt_single_file_out(path, &path_out, envelops, cmd_encrypt);
+    if cmd_encrypt.create {
+        if let Ok(content) = fs::read_to_string(path) {
+            if content == "\n" {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+    encrypt_single_result
 }
 
 pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
@@ -125,7 +136,12 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
     let cryptor = crypto_cryptor::get_cryptor_by_encryption_algorithm(&cmd_encrypt.encryption_algorithm)?;
     information!("Using encryption algorithm: {}", cryptor.get_name());
 
-    util::require_file_exists(path)?;
+    if cmd_encrypt.create {
+        util::require_file_not_exists(path)?;
+        opt_result!(fs::write(path, "\n"), "Write empty file failed: {}");
+    } else {
+        util::require_file_exists(path)?;
+    }
 
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
 
