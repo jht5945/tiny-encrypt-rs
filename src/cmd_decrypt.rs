@@ -9,7 +9,7 @@ use std::time::{Instant, SystemTime};
 use clap::Args;
 use flate2::Compression;
 use openpgp_card::crypto_data::Cryptogram;
-use rust_util::{debugging, failure, iff, information, opt_result, println_ex, simple_error, success, util_cmd, util_msg, util_size, util_time, warning, XResult};
+use rust_util::{debugging, failure, iff, information, opt_result, opt_value_result, println_ex, simple_error, success, util_cmd, util_msg, util_size, util_time, warning, XResult};
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -30,6 +30,8 @@ use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
 use crate::util::SecVec;
 use crate::util_digest::DigestWrite;
+#[cfg(feature = "macos")]
+use crate::util_keychainstatic;
 use crate::util_progress::Progress;
 use crate::wrap_key::WrapKey;
 
@@ -61,9 +63,12 @@ pub struct CmdDecrypt {
     /// Digest file
     #[arg(long, short = 'D')]
     pub digest_file: bool,
-    // Edit file
+    /// Edit file
     #[arg(long, short = 'E')]
     pub edit_file: bool,
+    // Readonly
+    #[arg(long)]
+    pub readonly: bool,
     /// Digest algorithm (sha1, sha256[default], sha384, sha512 ...)
     #[arg(long, short = 'A')]
     pub digest_algorithm: Option<String>,
@@ -195,7 +200,12 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
         let temp_file = create_edit_temp_file(&write_file_content, path_out)?;
 
         let do_edit_file = || -> XResult<()> {
-            let temp_file_content_bytes = run_file_editor_and_wait_content(&editor, &temp_file, secure_editor, &temp_encryption_key_nonce)?;
+            let temp_file_content_bytes = run_file_editor_and_wait_content(
+                &editor, &temp_file, secure_editor, cmd_decrypt.readonly, &temp_encryption_key_nonce)?;
+            if cmd_decrypt.readonly {
+                information!("Readonly, do not check temp file is changed.");
+                return Ok(());
+            }
             let temp_file_content_bytes = if secure_editor {
                 let mut decryptor = temp_cryptor.decryptor(&temp_key_nonce)?;
                 decryptor.decrypt(&temp_file_content_bytes)?
@@ -274,13 +284,14 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     Ok(meta.file_length)
 }
 
-fn run_file_editor_and_wait_content(editor: &str, temp_file: &PathBuf, secure_editor: bool, temp_encryption_key_nonce: &(SecVec, SecVec)) -> XResult<Vec<u8>> {
+fn run_file_editor_and_wait_content(editor: &str, temp_file: &PathBuf, secure_editor: bool, readonly: bool, temp_encryption_key_nonce: &(SecVec, SecVec)) -> XResult<Vec<u8>> {
     let mut command = Command::new(editor);
     command.arg(temp_file.to_str().expect("Get temp file path failed."));
     if secure_editor {
         command.arg("aes-256-gcm");
         command.arg(&hex::encode(&temp_encryption_key_nonce.0));
         command.arg(&hex::encode(&temp_encryption_key_nonce.1));
+        if readonly { command.env("READONLY", "true"); }
     }
     debugging!("Run cmd: {:?}", command);
     let run_cmd_result = util_cmd::run_command_and_wait(&mut command);
@@ -421,6 +432,8 @@ pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
     match envelop.r#type {
         TinyEncryptEnvelopType::Pgp => try_decrypt_key_pgp(envelop, pin),
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
+        #[cfg(feature = "macos")]
+        TinyEncryptEnvelopType::StaticX25519 => try_decrypt_key_ecdh_static_x25519(config, envelop),
         TinyEncryptEnvelopType::Ecdh | TinyEncryptEnvelopType::EcdhP384 => try_decrypt_key_ecdh(config, envelop, pin, slot),
         unknown_type => simple_error!("Unknown or unsupported type: {}", unknown_type.get_name()),
     }
@@ -491,6 +504,36 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
     Ok(decrypted_key)
 }
 
+#[cfg(feature = "macos")]
+fn try_decrypt_key_ecdh_static_x25519(config: &Option<TinyEncryptConfig>, envelop: &TinyEncryptEnvelop) -> XResult<Vec<u8>> {
+    let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
+    let cryptor = match wrap_key.header.enc.as_str() {
+        ENC_AES256_GCM_X25519 => Cryptor::Aes256Gcm,
+        ENC_CHACHA20_POLY1305_X25519 => Cryptor::ChaCha20Poly1305,
+        _ => return simple_error!("Unsupported header enc: {}", &wrap_key.header.enc),
+    };
+    let e_pub_key_bytes = wrap_key.header.get_e_pub_key_bytes()?;
+    let config = opt_value_result!(config, "Tiny encrypt config is not found");
+    let config_envelop = opt_value_result!(
+        config.find_by_kid(&envelop.kid), "Cannot find config for: {}", &envelop.kid);
+    let config_envelop_args = opt_value_result!(&config_envelop.args, "No arguments found for: {}", &envelop.kid);
+    if config_envelop_args.len() < 3 {
+        return simple_error!("Not enough arguments for: {}", &envelop.kid);
+    }
+    let service_name = &config_envelop_args[1];
+    let key_name = &config_envelop_args[2];
+    let shared_secret = opt_result!(
+        util_keychainstatic::decrypt_data(service_name, key_name, &e_pub_key_bytes), "Decrypt static x25519 failed: {}");
+
+    let key = util::simple_kdf(shared_secret.as_slice());
+    let key_nonce = KeyNonce { k: &key, n: &wrap_key.nonce };
+    let decrypted_key = crypto_simple::decrypt(
+        cryptor, &key_nonce, &wrap_key.encrypted_data)?;
+    util::zeroize(key);
+    util::zeroize(shared_secret);
+    Ok(decrypted_key)
+}
+
 fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
     let mut pgp = util_pgp::get_openpgp()?;
     let mut trans = opt_result!(pgp.transaction(), "Connect OpenPGP card failed: {}");
@@ -523,7 +566,9 @@ pub fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, co
     if envelops.len() == 1 {
         let selected_envelop = &envelops[0];
         success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, config));
-        util::read_line("Press enter to continue: ");
+        if !selected_envelop.r#type.auto_select() {
+            util::read_line("Press enter to continue: ");
+        }
         return Ok(selected_envelop);
     }
 

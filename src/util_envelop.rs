@@ -26,7 +26,7 @@ fn get_envelop_desc(envelop: &TinyEncryptEnvelop, config_envelop: &Option<&TinyE
 }
 
 pub fn with_width_type(s: &str) -> String {
-    with_width(s, 10)
+    with_width(s, 13)
 }
 
 pub fn with_width(s: &str, width: usize) -> String {

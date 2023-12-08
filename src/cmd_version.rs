@@ -8,8 +8,8 @@ pub struct CmdVersion {}
 
 pub fn version(_cmd_version: CmdVersion) -> XResult<()> {
     let mut features: Vec<&str> = vec![];
-    #[cfg(feature = "smartcard")]
-    features.push("smartcard");
+    #[cfg(feature = "decrypt")]
+    features.push("decrypt");
     #[cfg(feature = "macos")]
     features.push("macos");
     if features.is_empty() { features.push("-"); }

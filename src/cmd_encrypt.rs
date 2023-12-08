@@ -268,7 +268,7 @@ fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfig
             TinyEncryptEnvelopType::Pgp => {
                 encrypted_envelops.push(encrypt_envelop_pgp(key, envelop)?);
             }
-            TinyEncryptEnvelopType::PgpX25519 => {
+            TinyEncryptEnvelopType::PgpX25519 | TinyEncryptEnvelopType::StaticX25519 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh_x25519(cryptor, key, envelop)?);
             }
             TinyEncryptEnvelopType::Ecdh => {

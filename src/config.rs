@@ -42,9 +42,12 @@ pub struct TinyEncryptConfig {
 #[serde(rename_all = "camelCase")]
 pub struct TinyEncryptConfigEnvelop {
     pub r#type: TinyEncryptEnvelopType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sid: Option<String>,
     pub kid: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub desc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<String>>,
     pub public_part: String,
 }

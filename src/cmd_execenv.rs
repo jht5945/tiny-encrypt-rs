@@ -40,6 +40,7 @@ impl Drop for CmdExecEnv {
 }
 
 pub fn exec_env(cmd_exec_env: CmdExecEnv) -> XResult<()> {
+    util_msg::set_logger_std_out(false);
     debugging!("Cmd exec env: {:?}", cmd_exec_env);
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
     if cmd_exec_env.arguments.is_empty() {

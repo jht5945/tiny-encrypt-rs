@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "1.0.2"
+version = "1.1.2"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -9,8 +9,8 @@ repository = "https://git.hatter.ink/hatter/tiny-encrypt-rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["smartcard", "macos"]
-smartcard = ["openpgp-card", "openpgp-card-pcsc", "yubikey"]
+default = ["decrypt", "macos"]
+decrypt = ["openpgp-card", "openpgp-card-pcsc", "yubikey"]
 macos = ["security-framework"]
 
 [dependencies]
@@ -38,7 +38,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 simpledateformat = "0.1"
 tabled = "0.14"
-x25519-dalek = "2.0"
+x25519-dalek = { version = "2.0", features = ["static_secrets", "getrandom"] }
 x509-parser = "0.15"
 yubikey = { version = "0.8", features = ["untested"], optional = true }
 zeroize = "1.7"

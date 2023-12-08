@@ -3,9 +3,11 @@ extern crate core;
 use clap::{Parser, Subcommand};
 use rust_util::XResult;
 
-use tiny_encrypt::{CmdConfig, CmdDirectDecrypt, CmdEncrypt, CmdExecEnv, CmdInfo, CmdVersion};
-#[cfg(feature = "smartcard")]
+use tiny_encrypt::{CmdConfig, CmdDirectDecrypt, CmdEncrypt, CmdInfo, CmdVersion};
+#[cfg(feature = "decrypt")]
 use tiny_encrypt::CmdDecrypt;
+#[cfg(feature = "decrypt")]
+use tiny_encrypt::CmdExecEnv;
 #[cfg(feature = "macos")]
 use tiny_encrypt::CmdKeychainKey;
 
@@ -22,7 +24,7 @@ enum Commands {
     /// Encrypt file(s)
     #[command(arg_required_else_help = true, short_flag = 'e')]
     Encrypt(CmdEncrypt),
-    #[cfg(feature = "smartcard")]
+    #[cfg(feature = "decrypt")]
     /// Decrypt file(s)
     #[command(arg_required_else_help = true, short_flag = 'd')]
     Decrypt(CmdDecrypt),
@@ -36,6 +38,7 @@ enum Commands {
     /// Keychain Key [pending implementation]
     #[command(arg_required_else_help = true, short_flag = 'k')]
     KeychainKey(CmdKeychainKey),
+    #[cfg(feature = "decrypt")]
     /// Execute env
     #[command(arg_required_else_help = true, short_flag = 'X')]
     ExecEnv(CmdExecEnv),
@@ -51,12 +54,13 @@ fn main() -> XResult<()> {
     let args = Cli::parse();
     match args.command {
         Commands::Encrypt(cmd_encrypt) => tiny_encrypt::encrypt(cmd_encrypt),
-        #[cfg(feature = "smartcard")]
+        #[cfg(feature = "decrypt")]
         Commands::Decrypt(cmd_decrypt) => tiny_encrypt::decrypt(cmd_decrypt),
         Commands::DirectDecrypt(cmd_direct_decrypt) => tiny_encrypt::direct_decrypt(cmd_direct_decrypt),
         Commands::Info(cmd_info) => tiny_encrypt::info(cmd_info),
         #[cfg(feature = "macos")]
         Commands::KeychainKey(cmd_keychain_key) => tiny_encrypt::keychain_key(cmd_keychain_key),
+        #[cfg(feature = "decrypt")]
         Commands::ExecEnv(cmd_exec_env) => tiny_encrypt::exec_env(cmd_exec_env),
         Commands::Version(cmd_version) => tiny_encrypt::version(cmd_version),
         Commands::Config(cmd_config) => tiny_encrypt::config(cmd_config),

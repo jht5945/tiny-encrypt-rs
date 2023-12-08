@@ -71,6 +71,9 @@ pub enum TinyEncryptEnvelopType {
     // OpenPGP X25519
     #[serde(rename = "pgp-x25519")]
     PgpX25519,
+    // Static X25519 (less secure)
+    #[serde(rename = "static-x25519")]
+    StaticX25519,
     // Age, tiny-encrypt-rs is not supported
     #[serde(rename = "age")]
     Age,
@@ -89,14 +92,28 @@ impl TinyEncryptEnvelopType {
     pub fn get_upper_name(&self) -> String {
         self.get_name().to_uppercase()
     }
+
     pub fn get_name(&self) -> &'static str {
         match self {
             TinyEncryptEnvelopType::Pgp => "pgp",
             TinyEncryptEnvelopType::PgpX25519 => "pgp-x25519",
+            TinyEncryptEnvelopType::StaticX25519 => "static-x25519",
             TinyEncryptEnvelopType::Age => "age",
             TinyEncryptEnvelopType::Ecdh => "ecdh",
             TinyEncryptEnvelopType::EcdhP384 => "ecdh-p384",
             TinyEncryptEnvelopType::Kms => "kms",
+        }
+    }
+
+    pub fn auto_select(&self) -> bool {
+        match self {
+            TinyEncryptEnvelopType::Pgp => false,
+            TinyEncryptEnvelopType::PgpX25519 => false,
+            TinyEncryptEnvelopType::StaticX25519 => true,
+            TinyEncryptEnvelopType::Age => false,
+            TinyEncryptEnvelopType::Ecdh => false,
+            TinyEncryptEnvelopType::EcdhP384 => false,
+            TinyEncryptEnvelopType::Kms => true,
         }
     }
 }
