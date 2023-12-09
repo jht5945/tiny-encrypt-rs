@@ -74,6 +74,9 @@ pub enum TinyEncryptEnvelopType {
     // Static X25519 (less secure)
     #[serde(rename = "static-x25519")]
     StaticX25519,
+    // Key P256 (Private key in Secure Enclave)
+    #[serde(rename = "key-p256")]
+    KeyP256,
     // Age, tiny-encrypt-rs is not supported
     #[serde(rename = "age")]
     Age,
@@ -98,6 +101,7 @@ impl TinyEncryptEnvelopType {
             TinyEncryptEnvelopType::Pgp => "pgp",
             TinyEncryptEnvelopType::PgpX25519 => "pgp-x25519",
             TinyEncryptEnvelopType::StaticX25519 => "static-x25519",
+            TinyEncryptEnvelopType::KeyP256 => "key-p256",
             TinyEncryptEnvelopType::Age => "age",
             TinyEncryptEnvelopType::Ecdh => "ecdh",
             TinyEncryptEnvelopType::EcdhP384 => "ecdh-p384",
@@ -110,6 +114,7 @@ impl TinyEncryptEnvelopType {
             TinyEncryptEnvelopType::Pgp => false,
             TinyEncryptEnvelopType::PgpX25519 => false,
             TinyEncryptEnvelopType::StaticX25519 => true,
+            TinyEncryptEnvelopType::KeyP256 => true,
             TinyEncryptEnvelopType::Age => false,
             TinyEncryptEnvelopType::Ecdh => false,
             TinyEncryptEnvelopType::EcdhP384 => false,

@@ -66,7 +66,7 @@ pub fn decrypt_data(service_name: &str, key_name: &str, ephemeral_public_key_byt
     Ok(shared_secret.as_bytes().to_vec())
 }
 
-pub fn generate_pass_x25519_static_secret() -> (String, PublicKey) {
+pub fn generate_static_x25519_secret() -> (String, PublicKey) {
     let static_secret = StaticSecret::random();
     let public_key: PublicKey = (&static_secret).into();
     let static_secret_bytes = static_secret.as_bytes();

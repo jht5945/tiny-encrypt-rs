@@ -32,6 +32,8 @@ use crate::util::SecVec;
 use crate::util_digest::DigestWrite;
 #[cfg(feature = "macos")]
 use crate::util_keychainstatic;
+#[cfg(feature = "secure-enclave")]
+use crate::util_keychainkey;
 use crate::util_progress::Progress;
 use crate::wrap_key::WrapKey;
 
@@ -435,6 +437,8 @@ pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
         #[cfg(feature = "macos")]
         TinyEncryptEnvelopType::StaticX25519 => try_decrypt_key_ecdh_static_x25519(config, envelop),
         TinyEncryptEnvelopType::Ecdh | TinyEncryptEnvelopType::EcdhP384 => try_decrypt_key_ecdh(config, envelop, pin, slot),
+        #[cfg(feature = "secure-enclave")]
+        TinyEncryptEnvelopType::KeyP256 => try_decrypt_se_key_ecdh(config, envelop),
         unknown_type => simple_error!("Unknown or unsupported type: {}", unknown_type.get_name()),
     }
 }
@@ -474,6 +478,39 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
     let decrypted_key = crypto_simple::decrypt(
         cryptor, &key_nonce, &wrap_key.encrypted_data)?;
     util::zeroize(pin);
+    util::zeroize(key);
+    util::zeroize(shared_secret);
+    Ok(decrypted_key)
+}
+
+#[cfg(feature = "secure-enclave")]
+fn try_decrypt_se_key_ecdh(config: &Option<TinyEncryptConfig>,
+                           envelop: &TinyEncryptEnvelop) -> XResult<Vec<u8>> {
+    let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
+    let cryptor = match wrap_key.header.enc.as_str() {
+        ENC_AES256_GCM_P256 => Cryptor::Aes256Gcm,
+        ENC_CHACHA20_POLY1305_P256 => Cryptor::ChaCha20Poly1305,
+        _ => return simple_error!("Unsupported header enc: {}", &wrap_key.header.enc),
+    };
+    let e_pub_key_bytes = wrap_key.header.get_e_pub_key_bytes()?;
+
+    let config = opt_value_result!(config, "Tiny encrypt config is not found");
+    let config_envelop = opt_value_result!(
+        config.find_by_kid(&envelop.kid), "Cannot find config for: {}", &envelop.kid);
+    let config_envelop_args = opt_value_result!(&config_envelop.args, "No arguments found for: {}", &envelop.kid);
+    if config_envelop_args.is_empty() {
+        return simple_error!("Not enough arguments for: {}", &envelop.kid);
+    }
+    let private_key_base64 = &config_envelop_args[0];
+
+    let shared_secret = opt_result!(util_keychainkey::decrypt_data(
+                private_key_base64,
+                &e_pub_key_bytes
+            ), "Decrypt via secure enclave failed: {}");
+    let key = util::simple_kdf(shared_secret.as_slice());
+    let key_nonce = KeyNonce { k: &key, n: &wrap_key.nonce };
+    let decrypted_key = crypto_simple::decrypt(
+        cryptor, &key_nonce, &wrap_key.encrypted_data)?;
     util::zeroize(key);
     util::zeroize(shared_secret);
     Ok(decrypted_key)

@@ -12,20 +12,19 @@ pub use cmd_encrypt::CmdEncrypt;
 pub use cmd_encrypt::encrypt;
 pub use cmd_encrypt::encrypt_single;
 pub use cmd_encrypt::encrypt_single_file_out;
-pub use cmd_info::CmdInfo;
-pub use cmd_info::info;
-pub use cmd_info::info_single;
-pub use cmd_version::CmdVersion;
-pub use cmd_version::version;
-#[cfg(feature = "macos")]
-pub use cmd_initkeychainkey::CmdKeychainKey;
-#[cfg(feature = "macos")]
-pub use cmd_initkeychainkey::keychain_key;
 #[cfg(feature = "decrypt")]
 pub use cmd_execenv::CmdExecEnv;
 #[cfg(feature = "decrypt")]
 pub use cmd_execenv::exec_env;
-
+pub use cmd_info::CmdInfo;
+pub use cmd_info::info;
+pub use cmd_info::info_single;
+#[cfg(feature = "macos")]
+pub use cmd_initkeychainkey::CmdKeychainKey;
+#[cfg(feature = "macos")]
+pub use cmd_initkeychainkey::keychain_key;
+pub use cmd_version::CmdVersion;
+pub use cmd_version::version;
 
 mod consts;
 mod util;
@@ -62,4 +61,6 @@ mod cmd_initkeychainkey;
 mod util_keychainstatic;
 #[cfg(feature = "decrypt")]
 mod cmd_execenv;
+#[cfg(feature = "secure-enclave")]
+mod util_keychainkey;
 
