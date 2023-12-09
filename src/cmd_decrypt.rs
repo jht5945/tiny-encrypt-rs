@@ -41,13 +41,13 @@ use crate::wrap_key::WrapKey;
 pub struct CmdDecrypt {
     /// Files need to be decrypted
     pub paths: Vec<PathBuf>,
-    /// PIN
+    /// PGP or PIV PIN
     #[arg(long, short = 'p')]
     pub pin: Option<String>,
     /// KeyID
     #[arg(long, short = 'k')]
     pub key_id: Option<String>,
-    /// Slot
+    /// PIV slot
     #[arg(long, short = 's')]
     pub slot: Option<String>,
     /// Remove source file
@@ -68,7 +68,7 @@ pub struct CmdDecrypt {
     /// Edit file
     #[arg(long, short = 'E')]
     pub edit_file: bool,
-    // Readonly
+    /// Readonly mode
     #[arg(long)]
     pub readonly: bool,
     /// Digest algorithm (sha1, sha256[default], sha384, sha512 ...)
@@ -432,11 +432,11 @@ pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
                        pin: &Option<String>,
                        slot: &Option<String>) -> XResult<Vec<u8>> {
     match envelop.r#type {
-        TinyEncryptEnvelopType::Pgp => try_decrypt_key_pgp(envelop, pin),
+        TinyEncryptEnvelopType::PgpRsa => try_decrypt_key_pgp(envelop, pin),
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
         #[cfg(feature = "macos")]
         TinyEncryptEnvelopType::StaticX25519 => try_decrypt_key_ecdh_static_x25519(config, envelop),
-        TinyEncryptEnvelopType::Ecdh | TinyEncryptEnvelopType::EcdhP384 => try_decrypt_key_ecdh(config, envelop, pin, slot),
+        TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::PivP384 => try_decrypt_key_ecdh(config, envelop, pin, slot),
         #[cfg(feature = "secure-enclave")]
         TinyEncryptEnvelopType::KeyP256 => try_decrypt_se_key_ecdh(config, envelop),
         unknown_type => simple_error!("Unknown or unsupported type: {}", unknown_type.get_name()),

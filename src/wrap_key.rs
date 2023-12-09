@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::util;
 
+pub const WRAP_KEY_PREFIX: &str = "WK:";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WrapKey {
@@ -37,7 +39,7 @@ impl WrapKeyHeader {
 impl WrapKey {
     pub fn encode(&self) -> XResult<String> {
         let mut buf = String::with_capacity(512);
-        buf.push_str("WK:");
+        buf.push_str(WRAP_KEY_PREFIX);
         let header = serde_json::to_string(&self.header)?;
         let header_str = util::encode_base64_url_no_pad(header.as_bytes());
         buf.push_str(&header_str);
@@ -49,7 +51,7 @@ impl WrapKey {
     }
 
     pub fn parse(wk: &str) -> XResult<WrapKey> {
-        if !wk.starts_with("WK:") {
+        if !wk.starts_with(WRAP_KEY_PREFIX) {
             return simple_error!("Wrap key string must starts with WK:");
         }
         let wks = wk.split('.').collect::<Vec<_>>();

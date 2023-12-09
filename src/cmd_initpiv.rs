@@ -1,0 +1,157 @@
+use clap::Args;
+use p256::pkcs8::der::Decode;
+use rust_util::{failure, iff, information, opt_result, simple_error, warning, XResult};
+use spki::{ObjectIdentifier, SubjectPublicKeyInfoOwned};
+use spki::der::Encode;
+use x509_parser::prelude::FromDer;
+use x509_parser::public_key::RSAPublicKey;
+use yubikey::Certificate;
+use yubikey::Key;
+use yubikey::piv::{AlgorithmId, RetiredSlotId, SlotId};
+use yubikey::YubiKey;
+
+use crate::config::TinyEncryptConfigEnvelop;
+use crate::spec::TinyEncryptEnvelopType;
+
+#[derive(Debug, Args)]
+pub struct CmdInitPiv {
+    /// PIV slot
+    #[arg(long, short = 's')]
+    pub slot: String,
+}
+
+const RSA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
+const ECC: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+
+const ECC_P256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+const ECC_P384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
+
+pub fn init_piv(cmd_init_piv: CmdInitPiv) -> XResult<()> {
+    let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
+    let slot_id = get_slot_id(&cmd_init_piv.slot)?;
+    let slot_id_hex = to_slot_hex(&slot_id);
+    let keys = opt_result!(Key::list(&mut yk), "List keys failed: {}");
+
+    let find_key = || {
+        for k in &keys {
+            let key_slot_str = format!("{:x}", Into::<u8>::into(k.slot()));
+            if slot_equals(&slot_id, &key_slot_str) {
+                return Some(k);
+            }
+        }
+        None
+    };
+    let key = match find_key() {
+        None => {
+            warning!("Key not found.");
+            return Ok(());
+        }
+        Some(key) => key,
+    };
+    let cert = &key.certificate().cert.tbs_certificate;
+    if let Ok(algorithm_id) = get_algorithm_id_by_certificate(key.certificate()) {
+        let public_key_bit_string = &cert.subject_public_key_info.subject_public_key;
+        match algorithm_id {
+            AlgorithmId::EccP256 | AlgorithmId::EccP384 => {
+                let pk_point_hex = public_key_bit_string.raw_bytes();
+                let public_key_point_hex = hex::encode(pk_point_hex);
+                let compressed_public_key_point_hex = format!("02{}", hex::encode(&pk_point_hex[1..(pk_point_hex.len() / 2) + 1]));
+
+                let is_p256 = algorithm_id == AlgorithmId::EccP256;
+                let config_envelop = TinyEncryptConfigEnvelop {
+                    r#type: iff!(is_p256, TinyEncryptEnvelopType::PivP256, TinyEncryptEnvelopType::PivP384),
+                    sid: Some(format!("piv-{}-ecdh-{}", &slot_id_hex, iff!(is_p256, "p256", "p384"))),
+                    kid: compressed_public_key_point_hex.clone(),
+                    desc: Some(format!("PIV --slot {}", &slot_id_hex)),
+                    args: Some(vec![
+                        slot_id_hex.clone()
+                    ]),
+                    public_part: public_key_point_hex,
+                };
+
+                information!("Config envelop:\n{}", serde_json::to_string_pretty(&config_envelop).unwrap());
+            }
+            _ => {
+                failure!("Only support P256 or P384, actual: {:?}", algorithm_id);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+
+fn get_algorithm_id_by_certificate(certificate: &Certificate) -> XResult<AlgorithmId> {
+    let tbs_certificate = &certificate.cert.tbs_certificate;
+    get_algorithm_id(&tbs_certificate.subject_public_key_info)
+}
+
+fn get_algorithm_id(public_key_info: &SubjectPublicKeyInfoOwned) -> XResult<AlgorithmId> {
+    if public_key_info.algorithm.oid == RSA {
+        let rsa_public_key = opt_result!(
+            RSAPublicKey::from_der(public_key_info.subject_public_key.raw_bytes()), "Parse public key failed: {}");
+        let starts_with_0 = rsa_public_key.1.modulus.starts_with(&[0]);
+        let public_key_bits = (rsa_public_key.1.modulus.len() - if starts_with_0 { 1 } else { 0 }) * 8;
+        if public_key_bits == 1024 {
+            return Ok(AlgorithmId::Rsa1024);
+        }
+        if public_key_bits == 2048 {
+            return Ok(AlgorithmId::Rsa2048);
+        }
+        return simple_error!("Unknown rsa bits: {}", public_key_bits);
+    }
+    if public_key_info.algorithm.oid == ECC {
+        if let Some(any) = &public_key_info.algorithm.parameters {
+            let any_parameter_der = opt_result!(any.to_der(), "Bad any parameter: {}");
+            let any_parameter_oid = opt_result!(ObjectIdentifier::from_der(&any_parameter_der), "Bad any parameter der: {}");
+            if any_parameter_oid == ECC_P256 {
+                return Ok(AlgorithmId::EccP256);
+            }
+            if any_parameter_oid == ECC_P384 {
+                return Ok(AlgorithmId::EccP384);
+            }
+            return simple_error!("Unknown any parameter oid: {}", any_parameter_oid);
+        }
+    }
+    simple_error!("Unknown algorithm: {}", public_key_info.algorithm.oid)
+}
+
+fn slot_equals(slot_id: &SlotId, slot: &str) -> bool {
+    get_slot_id(slot).map(|sid| &sid == slot_id).unwrap_or(false)
+}
+
+fn to_slot_hex(slot: &SlotId) -> String {
+    let slot_id: u8 = (*slot).into();
+    format!("{:x}", slot_id)
+}
+
+fn get_slot_id(slot: &str) -> XResult<SlotId> {
+    let slot_lower = slot.to_lowercase();
+    Ok(match slot_lower.as_str() {
+        "9a" | "auth" | "authentication" => SlotId::Authentication,
+        "9c" | "sign" | "signature" => SlotId::Signature,
+        "9d" | "keym" | "keymanagement" => SlotId::KeyManagement,
+        "9e" | "card" | "cardauthentication" => SlotId::CardAuthentication,
+        "r1" | "82" => SlotId::Retired(RetiredSlotId::R1),
+        "r2" | "83" => SlotId::Retired(RetiredSlotId::R2),
+        "r3" | "84" => SlotId::Retired(RetiredSlotId::R3),
+        "r4" | "85" => SlotId::Retired(RetiredSlotId::R4),
+        "r5" | "86" => SlotId::Retired(RetiredSlotId::R5),
+        "r6" | "87" => SlotId::Retired(RetiredSlotId::R6),
+        "r7" | "88" => SlotId::Retired(RetiredSlotId::R7),
+        "r8" | "89" => SlotId::Retired(RetiredSlotId::R8),
+        "r9" | "8a" => SlotId::Retired(RetiredSlotId::R9),
+        "r10" | "8b" => SlotId::Retired(RetiredSlotId::R10),
+        "r11" | "8c" => SlotId::Retired(RetiredSlotId::R11),
+        "r12" | "8d" => SlotId::Retired(RetiredSlotId::R12),
+        "r13" | "8e" => SlotId::Retired(RetiredSlotId::R13),
+        "r14" | "8f" => SlotId::Retired(RetiredSlotId::R14),
+        "r15" | "90" => SlotId::Retired(RetiredSlotId::R15),
+        "r16" | "91" => SlotId::Retired(RetiredSlotId::R16),
+        "r17" | "92" => SlotId::Retired(RetiredSlotId::R17),
+        "r18" | "93" => SlotId::Retired(RetiredSlotId::R18),
+        "r19" | "94" => SlotId::Retired(RetiredSlotId::R19),
+        "r20" | "95" => SlotId::Retired(RetiredSlotId::R20),
+        _ => return simple_error!("Unknown slot: {}", slot),
+    })
+}

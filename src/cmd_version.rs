@@ -14,6 +14,8 @@ pub fn version(_cmd_version: CmdVersion) -> XResult<()> {
     features.push("decrypt".to_string());
     #[cfg(feature = "macos")]
     features.push("macos".to_string());
+    #[cfg(feature = "smartcard")]
+    features.push("smartcard".to_string());
     #[cfg(feature = "secure-enclave")]
     features.push(format!("secure-enclave{}", iff!(util_keychainkey::is_support_se(), "*", "")));
     if features.is_empty() { features.push("-".to_string()); }

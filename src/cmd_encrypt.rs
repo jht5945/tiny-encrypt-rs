@@ -52,8 +52,8 @@ pub struct CmdEncrypt {
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
-    /// Create file
-    #[arg(long)]
+    /// Create file (create a empty encrypted file)
+    #[arg(long, short = 'a')]
     pub create: bool,
     /// Disable compress meta
     #[arg(long)]
@@ -265,16 +265,16 @@ fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfig
     let mut encrypted_envelops = vec![];
     for envelop in envelops {
         match envelop.r#type {
-            TinyEncryptEnvelopType::Pgp => {
+            TinyEncryptEnvelopType::PgpRsa => {
                 encrypted_envelops.push(encrypt_envelop_pgp(key, envelop)?);
             }
             TinyEncryptEnvelopType::PgpX25519 | TinyEncryptEnvelopType::StaticX25519 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh_x25519(cryptor, key, envelop)?);
             }
-            TinyEncryptEnvelopType::Ecdh | TinyEncryptEnvelopType::KeyP256 => {
+            TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::KeyP256 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh(cryptor, key, envelop)?);
             }
-            TinyEncryptEnvelopType::EcdhP384 => {
+            TinyEncryptEnvelopType::PivP384 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh_p384(cryptor, key, envelop)?);
             }
             _ => return simple_error!("Not supported type: {:?}", envelop.r#type),
@@ -285,7 +285,7 @@ fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfig
 
 fn encrypt_envelop_ecdh(cryptor: Cryptor, key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let public_key_point_hex = &envelop.public_part;
-    let (shared_secret, ephemeral_spki) = util_p256::compute_shared_secret(public_key_point_hex)?;
+    let (shared_secret, ephemeral_spki) = util_p256::compute_p256_shared_secret(public_key_point_hex)?;
     let enc_type = match cryptor {
         Cryptor::Aes256Gcm => ENC_AES256_GCM_P256,
         Cryptor::ChaCha20Poly1305 => ENC_CHACHA20_POLY1305_P256,

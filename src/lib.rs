@@ -20,9 +20,13 @@ pub use cmd_info::CmdInfo;
 pub use cmd_info::info;
 pub use cmd_info::info_single;
 #[cfg(feature = "macos")]
-pub use cmd_initkeychainkey::CmdKeychainKey;
+pub use cmd_initkeychain::CmdInitKeychain;
 #[cfg(feature = "macos")]
-pub use cmd_initkeychainkey::keychain_key;
+pub use cmd_initkeychain::init_keychain;
+#[cfg(feature = "smartcard")]
+pub use cmd_initpiv::CmdInitPiv;
+#[cfg(feature = "smartcard")]
+pub use cmd_initpiv::init_piv;
 pub use cmd_version::CmdVersion;
 pub use cmd_version::version;
 
@@ -56,7 +60,9 @@ mod cmd_decrypt;
 mod cmd_encrypt;
 mod cmd_directdecrypt;
 #[cfg(feature = "macos")]
-mod cmd_initkeychainkey;
+mod cmd_initkeychain;
+#[cfg(feature = "smartcard")]
+mod cmd_initpiv;
 #[cfg(feature = "macos")]
 mod util_keychainstatic;
 #[cfg(feature = "decrypt")]

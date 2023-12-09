@@ -1,8 +1,7 @@
-use std::fs::Metadata;
-
 use rust_util::{opt_result, util_time, XResult};
 use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
+use std::fs::Metadata;
 
 use crate::{compress, crypto_simple};
 use crate::consts::SALT_META;
@@ -65,27 +64,27 @@ pub struct TinyEncryptEnvelop {
 /// NOTICE: Kms and Age is not being supported in the future
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub enum TinyEncryptEnvelopType {
-    // OpenPGP RSA
-    #[serde(rename = "pgp")]
-    Pgp,
-    // OpenPGP X25519
+    // OpenPGP Card RSA
+    #[serde(rename = "pgp-rsa", alias = "pgp")]
+    PgpRsa,
+    // OpenPGP Card X25519
     #[serde(rename = "pgp-x25519")]
     PgpX25519,
-    // Static X25519 (less secure)
+    // Keychain Static X25519 (less secure)
     #[serde(rename = "static-x25519")]
     StaticX25519,
-    // Key P256 (Private key in Secure Enclave)
+    // Secure Enclave ECDH P256
     #[serde(rename = "key-p256")]
     KeyP256,
     // Age, tiny-encrypt-rs is not supported
     #[serde(rename = "age")]
     Age,
-    // ECDH P256
-    #[serde(rename = "ecdh")]
-    Ecdh,
-    // ECDH P384
-    #[serde(rename = "ecdh-p384")]
-    EcdhP384,
+    // PIV ECDH P256
+    #[serde(rename = "piv-p256", alias = "ecdh")]
+    PivP256,
+    // PIV ECDH P384
+    #[serde(rename = "piv-p384", alias = "ecdh-p384")]
+    PivP384,
     // KMS, tiny-encrypt-rs is not supported
     #[serde(rename = "kms")]
     Kms,
@@ -98,26 +97,26 @@ impl TinyEncryptEnvelopType {
 
     pub fn get_name(&self) -> &'static str {
         match self {
-            TinyEncryptEnvelopType::Pgp => "pgp",
+            TinyEncryptEnvelopType::PgpRsa => "pgp-rsa",
             TinyEncryptEnvelopType::PgpX25519 => "pgp-x25519",
             TinyEncryptEnvelopType::StaticX25519 => "static-x25519",
             TinyEncryptEnvelopType::KeyP256 => "key-p256",
             TinyEncryptEnvelopType::Age => "age",
-            TinyEncryptEnvelopType::Ecdh => "ecdh",
-            TinyEncryptEnvelopType::EcdhP384 => "ecdh-p384",
+            TinyEncryptEnvelopType::PivP256 => "piv-p256",
+            TinyEncryptEnvelopType::PivP384 => "piv-p384",
             TinyEncryptEnvelopType::Kms => "kms",
         }
     }
 
     pub fn auto_select(&self) -> bool {
         match self {
-            TinyEncryptEnvelopType::Pgp => false,
+            TinyEncryptEnvelopType::PgpRsa => false,
             TinyEncryptEnvelopType::PgpX25519 => false,
             TinyEncryptEnvelopType::StaticX25519 => true,
             TinyEncryptEnvelopType::KeyP256 => true,
             TinyEncryptEnvelopType::Age => false,
-            TinyEncryptEnvelopType::Ecdh => false,
-            TinyEncryptEnvelopType::EcdhP384 => false,
+            TinyEncryptEnvelopType::PivP256 => false,
+            TinyEncryptEnvelopType::PivP384 => false,
             TinyEncryptEnvelopType::Kms => true,
         }
     }
@@ -215,7 +214,7 @@ impl TinyEncryptMeta {
         if let (Some(pgp_envelop), Some(pgp_fingerprint), Some(envelops))
             = (&self.pgp_envelop, &self.pgp_fingerprint, &mut self.envelops) {
             envelops.push(TinyEncryptEnvelop {
-                r#type: TinyEncryptEnvelopType::Pgp,
+                r#type: TinyEncryptEnvelopType::PgpRsa,
                 kid: pgp_fingerprint.into(),
                 desc: None,
                 encrypted_key: pgp_envelop.into(),
@@ -243,7 +242,7 @@ impl TinyEncryptMeta {
         if let (Some(ecdh_envelop), Some(ecdh_point), Some(envelops))
             = (&self.ecdh_envelop, &self.ecdh_point, &mut self.envelops) {
             envelops.push(TinyEncryptEnvelop {
-                r#type: TinyEncryptEnvelopType::Ecdh,
+                r#type: TinyEncryptEnvelopType::PivP256,
                 kid: ecdh_point.into(),
                 desc: None,
                 encrypted_key: ecdh_envelop.into(),

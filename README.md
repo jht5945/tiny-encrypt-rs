@@ -70,12 +70,14 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
 
 Supported PKI encryption types:
 
-| Type       | Algorithm       | Description            |
-|------------|-----------------|------------------------|
-| pgp        | PKCS1-v1.5      | OpenPGP Encryption Key |
-| pgp-x25519 | ECDH(X25519)    | OpenPGP Encryption Key |
-| ecdh       | ECDH(secp256r1) | PIV Slot               |
-| ecdh-p384  | ECDH(secp384r1) | PIV Slot               |
+| Type          | Algorithm       | Description                             |
+|---------------|-----------------|-----------------------------------------|
+| pgp-rsa       | PKCS1-v1.5      | OpenPGP Encryption Key (Previous `pgp`) |
+| pgp-x25519    | ECDH(X25519)    | OpenPGP Encryption Key                  |
+| static-x25519 | ECDH(X25519)    | Key Stored in KeyChain                  |
+| piv-p256      | ECDH(secp256r1) | PIV Slot (Previous `ecdh`)              |
+| piv-p384      | ECDH(secp384r1) | PIV Slot (Previous `ecdh-p384`)         |
+| key-p256      | ECDH(secp256r1) | Key Stored in Secure Enclave            |
 
 Smart Card(Yubikey) protected ECDH Encryption description:
 

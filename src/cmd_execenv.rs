@@ -18,19 +18,19 @@ use crate::util_enc_file;
 
 #[derive(Debug, Args)]
 pub struct CmdExecEnv {
-    /// PIN
+    /// PGP or PIV PIN
     #[arg(long, short = 'p')]
     pub pin: Option<String>,
     /// KeyID
     #[arg(long, short = 'k')]
     pub key_id: Option<String>,
-    /// Slot
+    /// PIV slot
     #[arg(long, short = 's')]
     pub slot: Option<String>,
-    // Tiny encrypt file name
+    /// Tiny encrypt file name
     pub file_name: String,
-    // Arguments
-    pub arguments: Vec<String>,
+    /// Command and arguments
+    pub command_arguments: Vec<String>,
 }
 
 impl Drop for CmdExecEnv {
@@ -43,7 +43,7 @@ pub fn exec_env(cmd_exec_env: CmdExecEnv) -> XResult<()> {
     util_msg::set_logger_std_out(false);
     debugging!("Cmd exec env: {:?}", cmd_exec_env);
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
-    if cmd_exec_env.arguments.is_empty() {
+    if cmd_exec_env.command_arguments.is_empty() {
         return simple_error!("No commands assigned.");
     }
 
@@ -75,7 +75,7 @@ pub fn exec_env(cmd_exec_env: CmdExecEnv) -> XResult<()> {
     let decrypted_content = decrypt_limited_content_to_vec(&mut file_in, &meta, cryptor, &key_nonce)?;
     let exit_code = if let Some(output) = decrypted_content {
         debugging!("Outputs: {}", output);
-        let arguments = &cmd_exec_env.arguments;
+        let arguments = &cmd_exec_env.command_arguments;
         let envs = parse_output_to_env(&output);
 
         let mut command = Command::new(&arguments[0]);

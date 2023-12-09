@@ -9,7 +9,9 @@ use tiny_encrypt::CmdDecrypt;
 #[cfg(feature = "decrypt")]
 use tiny_encrypt::CmdExecEnv;
 #[cfg(feature = "macos")]
-use tiny_encrypt::CmdKeychainKey;
+use tiny_encrypt::CmdInitKeychain;
+#[cfg(feature = "smartcard")]
+use tiny_encrypt::CmdInitPiv;
 
 #[derive(Debug, Parser)]
 #[command(name = "tiny-encrypt-rs")]
@@ -31,21 +33,25 @@ enum Commands {
     /// Direct decrypt file(s)
     #[command(arg_required_else_help = true)]
     DirectDecrypt(CmdDirectDecrypt),
-    /// Show file info
+    /// Show tiny encrypt file info
     #[command(arg_required_else_help = true, short_flag = 'I')]
     Info(CmdInfo),
     #[cfg(feature = "macos")]
-    /// Keychain Key [pending implementation]
-    #[command(arg_required_else_help = true, short_flag = 'k')]
-    KeychainKey(CmdKeychainKey),
+    /// Init Keychain (Secure Enclave or Static)
+    #[command(arg_required_else_help = true, short_flag = 'K')]
+    InitKeychain(CmdInitKeychain),
+    #[cfg(feature = "smartcard")]
+    /// Init PIV
+    #[command(arg_required_else_help = true, short_flag = 'P')]
+    InitPiv(CmdInitPiv),
     #[cfg(feature = "decrypt")]
-    /// Execute env
+    /// Execute environment
     #[command(arg_required_else_help = true, short_flag = 'X')]
     ExecEnv(CmdExecEnv),
     /// Show version
     #[command(short_flag = 'v')]
     Version(CmdVersion),
-    /// Show Config
+    /// Show configuration
     #[command(short_flag = 'c')]
     Config(CmdConfig),
 }
@@ -59,7 +65,9 @@ fn main() -> XResult<()> {
         Commands::DirectDecrypt(cmd_direct_decrypt) => tiny_encrypt::direct_decrypt(cmd_direct_decrypt),
         Commands::Info(cmd_info) => tiny_encrypt::info(cmd_info),
         #[cfg(feature = "macos")]
-        Commands::KeychainKey(cmd_keychain_key) => tiny_encrypt::keychain_key(cmd_keychain_key),
+        Commands::InitKeychain(cmd_keychain_key) => tiny_encrypt::init_keychain(cmd_keychain_key),
+        #[cfg(feature = "smartcard")]
+        Commands::InitPiv(cmd_init_piv) => tiny_encrypt::init_piv(cmd_init_piv),
         #[cfg(feature = "decrypt")]
         Commands::ExecEnv(cmd_exec_env) => tiny_encrypt::exec_env(cmd_exec_env),
         Commands::Version(cmd_version) => tiny_encrypt::version(cmd_version),
