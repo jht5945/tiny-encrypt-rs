@@ -51,7 +51,7 @@ pub struct CmdConfig {
     /// Encryption profile (use default when --key-filter is assigned)
     #[arg(long, short = 'p')]
     pub profile: Option<String>,
-    /// Encryption key filter (key_id or type:TYPE(e.g. ecdh, pgp, ecdh-p384, pgp-ed25519), multiple joined by ',', ALL for all)
+    /// Encryption key filter (key_id or type:TYPE(e.g. type:piv-p256, type:piv-p384, type:pgp-*), multiple joined by ',', ALL for all)
     #[arg(long, short = 'k')]
     pub key_filter: Option<String>,
 }
@@ -73,10 +73,10 @@ fn config_key_filter(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XRe
     for envelop in envelops {
         config_envelops.push(ConfigEnvelop {
             r#type: envelop.r#type.get_name().to_string(),
-            sid: envelop.sid.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()),
-            kid: process_kid(&envelop.kid),
-            desc: envelop.desc.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()),
-            args: envelop.args.as_ref().map(|a| format!("[{}]", a.join(", "))).unwrap_or_else(|| "-".to_string()),
+            sid: strip_field(&envelop.sid.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()), 25),
+            kid: strip_field(&envelop.kid, 40),
+            desc: strip_field(&envelop.desc.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()), 40),
+            args: strip_field(&envelop.args.as_ref().map(|a| format!("[{}]", a.join(", "))).unwrap_or_else(|| "-".to_string()), 20),
         });
     }
     let mut table = Table::new(config_envelops);
@@ -85,13 +85,13 @@ fn config_key_filter(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XRe
     Ok(())
 }
 
-fn process_kid(kid: &str) -> String {
-    if kid.len() < 10 {
+fn strip_field(kid: &str, max_len: usize) -> String {
+    if kid.len() <= max_len {
         kid.to_string()
     } else {
         kid.chars().enumerate()
-            .filter(|(i, _c)| *i <= 50)
-            .map(|(i, c)| iff!(i >= 48, '.', c)).collect()
+            .filter(|(i, _c)| *i < max_len)
+            .map(|(i, c)| iff!(i >= (max_len - 3), '.', c)).collect()
     }
 }
 

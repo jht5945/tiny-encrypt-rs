@@ -26,9 +26,10 @@ pub struct CmdInfo {
 }
 
 pub fn info(cmd_info: CmdInfo) -> XResult<()> {
+    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
     for (i, path) in cmd_info.paths.iter().enumerate() {
         if i > 0 { println!("{}", "-".repeat(88)); }
-        if let Err(e) = info_single(path, &cmd_info) {
+        if let Err(e) = info_single(path, &cmd_info, &config) {
             failure!("Parse Tiny Encrypt file info failed: {}", e);
         }
     }
@@ -36,13 +37,12 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
     Ok(())
 }
 
-pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
+pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo, config: &Option<TinyEncryptConfig>) -> XResult<()> {
     let path_display = format!("{}", path.display());
     if !path_display.ends_with(TINY_ENC_FILE_EXT) {
         return simple_error!("Not a Tiny Encrypt file: {}", path_display);
     }
 
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
     let mut file_in = opt_result!(File::open(path), "Open file: {} failed: {}", &path_display);
     let file_in_len = file_in.metadata().map(|m| m.len()).unwrap_or(0);
 
@@ -76,6 +76,9 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     infos.push(format!("{}: Version: {}, Agent: {}",
                        header("File summary"), meta.version, meta.user_agent)
     );
+    if let Some(latest_user_agent) = meta.latest_user_agent {
+        infos.push(format!("{}: {}", header("Latest user agent"), latest_user_agent))
+    }
 
     let now_millis = util_time::get_current_millis() as u64;
     let fmt = simpledateformat::fmt(DATE_TIME_FORMAT).unwrap();
@@ -100,7 +103,7 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
         envelops.iter().enumerate().for_each(|(i, envelop)| {
             infos.push(format!("{}: {}",
                                header(&format!("Envelop #{}", i + 1)),
-                               util_envelop::format_envelop(envelop, &config)
+                               util_envelop::format_envelop(envelop, config)
             ));
             util_msg::when_debug(|| {
                 if let Ok(wrap_key) = WrapKey::parse(&envelop.encrypted_key) {
@@ -118,11 +121,8 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo) -> XResult<()> {
     }
     infos.push(format!("{}: {}", header("Encrypted comment"), to_yes_or_no(&meta.encrypted_comment)));
     infos.push(format!("{}: {}", header("Encrypted meta"), to_yes_or_no(&meta.encrypted_meta)));
-    let encryption_algorithm = if let Some(encryption_algorithm) = &meta.encryption_algorithm {
-        encryption_algorithm.to_string()
-    } else {
-        format!("{} (default)", TINY_ENC_AES_GCM)
-    };
+    let encryption_algorithm = meta.encryption_algorithm.clone()
+        .unwrap_or_else(|| format!("{} (default)", TINY_ENC_AES_GCM));
     infos.push(format!("{}: {}", header("Encryption algorithm"), encryption_algorithm));
 
     success!("{}", infos.join("\n"));

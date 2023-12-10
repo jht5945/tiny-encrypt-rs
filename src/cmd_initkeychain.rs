@@ -1,5 +1,5 @@
 use clap::Args;
-use rust_util::{debugging, information, opt_result, opt_value_result, simple_error, success, XResult};
+use rust_util::{debugging, information, opt_result, opt_value_result, simple_error, success, warning, XResult};
 use security_framework::os::macos::keychain::SecKeychain;
 
 use crate::config::TinyEncryptConfigEnvelop;
@@ -7,6 +7,7 @@ use crate::spec::TinyEncryptEnvelopType;
 #[cfg(feature = "secure-enclave")]
 use crate::util_keychainkey;
 use crate::util_keychainstatic;
+use crate::util_keychainstatic::X25519StaticSecret;
 
 #[derive(Debug, Args)]
 pub struct CmdInitKeychain {
@@ -66,18 +67,25 @@ pub fn keychain_key_static(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
     let service_name = cmd_init_keychain.server_name.as_deref().unwrap_or(DEFAULT_SERVICE_NAME);
     let sec_keychain = opt_result!(SecKeychain::default(), "Get keychain failed: {}");
     let key_name = opt_value_result!(&cmd_init_keychain.key_name, "Key name is required.");
-    if sec_keychain.find_generic_password(service_name, key_name).is_ok() {
-        return simple_error!("Static x25519 exists: {}.{}", service_name, &key_name);
-    }
 
-    let (keychain_key, public_key) = util_keychainstatic::generate_static_x25519_secret();
-    opt_result!(
-        sec_keychain.set_generic_password(service_name, key_name, keychain_key.as_bytes()),
-        "Write static x25519 failed: {}"
-    );
+    let public_key = match sec_keychain.find_generic_password(service_name, key_name) {
+        Ok((static_x25519, _)) => {
+            warning!("Key already exists: {}.{}", service_name, key_name);
+            let x25519_static_secret = X25519StaticSecret::parse_bytes(static_x25519.as_ref())?;
+            x25519_static_secret.to_public_key()?
+        }
+        Err(_) => {
+            let (keychain_key, public_key) = util_keychainstatic::generate_static_x25519_secret();
+            debugging!("Keychain key : {}", keychain_key);
+            opt_result!(
+                sec_keychain.set_generic_password(service_name, key_name, keychain_key.as_bytes()),
+                "Write static x25519 failed: {}"
+            );
+            public_key
+        }
+    };
 
     let public_key_hex = hex::encode(public_key.as_bytes());
-    debugging!("Keychain key : {}", keychain_key);
     success!("Keychain name: {}", &key_name);
     success!("Public key   : {}", &public_key_hex);
 

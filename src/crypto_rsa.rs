@@ -4,11 +4,11 @@ use x509_parser::prelude::FromDer;
 use x509_parser::public_key::RSAPublicKey;
 use x509_parser::x509::SubjectPublicKeyInfo;
 
-use crate::util::decode_base64;
+use crate::util;
 
 /// Parse RSA Subject Public Key Info(SPKI) to Rsa Public Key
 pub fn parse_spki(pem: &str) -> XResult<RsaPublicKey> {
-    let der = pem_to_der_bytes(pem)?;
+    let der = util::parse_pem(pem)?;
     let spki = opt_result!(SubjectPublicKeyInfo::from_der(&der), "Parse SKPI failed: {}").1;
     let public_key_der = spki.subject_public_key.data;
     let public_key = opt_result!(RSAPublicKey::from_der(&public_key_der), "Parse RSA public key failed: {}").1;
@@ -17,25 +17,6 @@ pub fn parse_spki(pem: &str) -> XResult<RsaPublicKey> {
         BigUint::from_bytes_be(public_key.exponent),
     ), "Parse RSA public key failed: {}");
     Ok(rsa_public_key)
-}
-
-fn pem_to_der_bytes(pem: &str) -> XResult<Vec<u8>> {
-    let mut pem = pem.trim().to_owned();
-    if pem.starts_with("-----BEGIN") {
-        let mut filter_lines = vec![];
-        let lines = pem.lines().skip(1);
-        for ln in lines {
-            if ln.starts_with("-----END") {
-                break;
-            } else {
-                filter_lines.push(ln.to_string());
-            }
-        }
-        pem = filter_lines.join("");
-    }
-    pem = pem.chars().filter(|c| *c != '\n' && *c != '\r').clone().collect::<String>();
-
-    Ok(opt_result!(decode_base64(&pem), "Decode PEM failed: {}"))
 }
 
 #[test]
@@ -110,7 +91,7 @@ qaCoQsuRtnowGKzrbVdinukd1wj0LkBuz2oNMB3qsXyq7QtOxiFTuKkMOoQNUiCE
 KQIDAQAB
 -----END PUBLIC KEY-----";
     let public_key = parse_spki(public_key_pem).unwrap();
-    let private_key_der = pem_to_der_bytes(&private_key_pem).unwrap();
+    let private_key_der = util::parse_pem(&private_key_pem).unwrap();
     let private_key_info = PrivateKeyInfo::from_der(&private_key_der).unwrap();
     let private_key = RsaPrivateKey::try_from(private_key_info).unwrap();
     let mut rng = rand::thread_rng();

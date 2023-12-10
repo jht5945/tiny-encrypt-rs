@@ -24,7 +24,7 @@ pub fn write_tiny_encrypt_meta(write: &mut impl Write, meta: &TinyEncryptMeta, c
 
 pub fn read_tiny_encrypt_meta_and_normalize(r: &mut impl Read) -> XResult<(u32, bool, TinyEncryptMeta)> {
     let mut meta_len_and_meta = read_tiny_encrypt_meta(r);
-    let _ = meta_len_and_meta.as_mut().map(|ml| ml.2.normalize());
+    let _ = meta_len_and_meta.as_mut().map(|ml| ml.2.normalize_envelops());
     meta_len_and_meta
 }
 

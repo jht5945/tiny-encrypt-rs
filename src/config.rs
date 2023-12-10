@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::fs;
+use std::{env, fs};
 
 use rust_util::{debugging, opt_result, simple_error, XResult};
 use rust_util::util_file::resolve_file_path;
@@ -34,6 +34,7 @@ use crate::spec::TinyEncryptEnvelopType;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TinyEncryptConfig {
+    pub environment: Option<HashMap<String, String>>,
     pub envelops: Vec<TinyEncryptConfigEnvelop>,
     pub profiles: HashMap<String, Vec<String>>,
 }
@@ -74,6 +75,14 @@ impl TinyEncryptConfig {
             }
         }
         config.profiles = splited_profiles;
+
+        if let Some(environment) = &config.environment {
+            for (k, v) in environment {
+                debugging!("Set env: {}={}", k, v);
+                env::set_var(k, v);
+            }
+        }
+
         Ok(config)
     }
 
@@ -91,7 +100,18 @@ impl TinyEncryptConfig {
 
     pub fn find_by_kid_or_type(&self, k_filter: &str) -> Vec<&TinyEncryptConfigEnvelop> {
         self.find_by_kid_or_filter(k_filter, |e| {
-            k_filter == "ALL" || k_filter == format!("type:{}", &e.r#type.get_name())
+            let envelop_type = format!("type:{}", &e.r#type.get_name());
+            if k_filter == "ALL" || k_filter == "*" || k_filter == envelop_type {
+                return true;
+            }
+            if k_filter.ends_with('*') {
+                let new_k_filter = k_filter.chars().collect::<Vec<_>>();
+                let new_k_filter = new_k_filter.iter().take(new_k_filter.len() - 1).collect::<String>();
+                if e.kid.starts_with(&new_k_filter) || envelop_type.starts_with(&new_k_filter) {
+                    return true;
+                }
+            }
+            false
         })
     }
 

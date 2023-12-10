@@ -1,7 +1,8 @@
+use std::fs::Metadata;
+
 use rust_util::{opt_result, util_time, XResult};
 use rust_util::util_time::get_millis;
 use serde::{Deserialize, Serialize};
-use std::fs::Metadata;
 
 use crate::{compress, crypto_simple};
 use crate::consts::SALT_META;
@@ -19,6 +20,7 @@ pub struct TinyEncryptMeta {
     pub version: String,
     pub created: u64,
     pub user_agent: String,
+    pub latest_user_agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,6 +49,7 @@ pub struct TinyEncryptMeta {
     pub nonce: String,
     pub file_length: u64,
     pub file_last_modified: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub file_edit_count: Option<u64>,
     pub compress: bool,
 }
@@ -170,6 +173,7 @@ impl TinyEncryptMeta {
             version: TINY_ENCRYPT_VERSION_11.to_string(),
             created: util_time::get_current_millis() as u64,
             user_agent: get_user_agent(),
+            latest_user_agent: None,
             comment: enc_metadata.comment.to_owned(),
             encrypted_comment: enc_metadata.encrypted_comment.to_owned(),
             encrypted_meta: enc_metadata.encrypted_meta.to_owned(),
@@ -193,17 +197,18 @@ impl TinyEncryptMeta {
         }
     }
 
-    pub fn normalize(&mut self) {
+    // compatibility with legacy tiny encrypt format
+    pub fn normalize_envelops(&mut self) {
         if self.envelops.is_none() {
             self.envelops = Some(vec![]);
         }
-        self.normalize_envelop();
-        self.normalize_pgp_envelop();
+        self.normalize_kms_envelop();
+        self.normalize_pgp_rsa_envelop();
         self.normalize_age_envelop();
-        self.normalize_ecdh_envelop();
+        self.normalize_piv_p256_envelop();
     }
 
-    fn normalize_envelop(&mut self) {
+    fn normalize_kms_envelop(&mut self) {
         if let (Some(envelop), Some(envelops)) = (&self.envelop, &mut self.envelops) {
             envelops.push(TinyEncryptEnvelop {
                 r#type: TinyEncryptEnvelopType::Kms,
@@ -215,7 +220,7 @@ impl TinyEncryptMeta {
         }
     }
 
-    fn normalize_pgp_envelop(&mut self) {
+    fn normalize_pgp_rsa_envelop(&mut self) {
         if let (Some(pgp_envelop), Some(pgp_fingerprint), Some(envelops))
             = (&self.pgp_envelop, &self.pgp_fingerprint, &mut self.envelops) {
             envelops.push(TinyEncryptEnvelop {
@@ -243,7 +248,7 @@ impl TinyEncryptMeta {
         }
     }
 
-    fn normalize_ecdh_envelop(&mut self) {
+    fn normalize_piv_p256_envelop(&mut self) {
         if let (Some(ecdh_envelop), Some(ecdh_point), Some(envelops))
             = (&self.ecdh_envelop, &self.ecdh_point, &mut self.envelops) {
             envelops.push(TinyEncryptEnvelop {

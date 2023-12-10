@@ -16,6 +16,11 @@ impl Zeroize for X25519StaticSecret {
 }
 
 impl X25519StaticSecret {
+    pub fn parse_bytes(bs: &[u8]) -> XResult<Self> {
+        let key_str = opt_result!(String::from_utf8(bs.to_vec()), "Parse static x25519 failed: {}");
+        Self::parse(&key_str)
+    }
+
     pub fn parse(key: &str) -> XResult<Self> {
         if !key.starts_with(X2559_PLAIN_PREFIX) {
             return simple_error!("Not X25519 plain key");
@@ -47,16 +52,20 @@ impl X25519StaticSecret {
         inner_secret.zeroize();
         Ok(static_secret)
     }
+
+    pub fn to_public_key(&self) -> XResult<PublicKey> {
+        let static_secret = self.to_static_secret()?;
+        let public_key: PublicKey = (&static_secret).into();
+        Ok(public_key)
+    }
 }
 
 pub fn decrypt_data(service_name: &str, key_name: &str, ephemeral_public_key_bytes: &[u8]) -> XResult<Vec<u8>> {
     let sec_keychain = opt_result!(SecKeychain::default(), "Get keychain failed: {}");
     let (static_x25519, _) = opt_result!(sec_keychain.find_generic_password(service_name, key_name),
         "Cannot find static x25519 {}.{}: {}", service_name, key_name);
-    let static_x25519_bytes = static_x25519.as_ref();
-    let static_x25519_str = opt_result!(String::from_utf8(static_x25519_bytes.to_vec()), "Parse static x25519 failed: {}");
 
-    let x25519_static_secret = X25519StaticSecret::parse(&static_x25519_str)?;
+    let x25519_static_secret = X25519StaticSecret::parse_bytes(static_x25519.as_ref())?;
     let static_secret = x25519_static_secret.to_static_secret()?;
     let inner_ephemeral_public_key: [u8; 32] = opt_result!(
         ephemeral_public_key_bytes.try_into(), "X25519 public key error: {}");

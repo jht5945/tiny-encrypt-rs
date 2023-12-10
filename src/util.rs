@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use base64::engine::general_purpose;
 use rand::random;
-use rust_util::{information, print_ex, simple_error, util_term, warning, XResult};
+use rust_util::{information, opt_result, print_ex, simple_error, util_term, warning, XResult};
 use zeroize::Zeroize;
 
 use crate::consts::TINY_ENC_FILE_EXT;
@@ -107,6 +107,25 @@ pub fn simple_kdf(input: &[u8]) -> Vec<u8> {
         input = sha256.digest();
     }
     input
+}
+
+pub fn parse_pem(pem: &str) -> XResult<Vec<u8>> {
+    let mut pem = pem.trim().to_owned();
+    if pem.starts_with("-----BEGIN") {
+        let mut filter_lines = vec![];
+        let lines = pem.lines().skip(1);
+        for ln in lines {
+            if ln.starts_with("-----END") {
+                break;
+            } else {
+                filter_lines.push(ln.to_string());
+            }
+        }
+        pem = filter_lines.join("");
+    }
+    pem = pem.chars().filter(|c| *c != '\n' && *c != '\r').clone().collect::<String>();
+
+    Ok(opt_result!(decode_base64(&pem), "Decode PEM failed: {}"))
 }
 
 pub fn to_pem(bs: &[u8], name: &str) -> String {

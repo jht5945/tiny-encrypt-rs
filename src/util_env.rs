@@ -1,6 +1,6 @@
 use std::env;
 
-use rust_util::{debugging, iff, warning};
+use rust_util::{debugging, util_env, warning};
 use rust_util::util_env as rust_util_env;
 
 use crate::consts;
@@ -10,6 +10,7 @@ pub const TINY_ENCRYPT_ENV_DEFAULT_COMPRESS: &str = "TINY_ENCRYPT_DEFAULT_COMPRE
 pub const TINY_ENCRYPT_ENV_NO_PROGRESS: &str = "TINY_ENCRYPT_NO_PROGRESS";
 pub const TINY_ENCRYPT_ENV_PIN: &str = "TINY_ENCRYPT_PIN";
 pub const TINY_ENCRYPT_ENV_KEY_ID: &str = "TINY_ENCRYPT_KEY_ID";
+pub const TINY_ENCRYPT_ENV_AUTO_SELECT_KEY_IDS: &str = "TINY_ENCRYPT_AUTO_SELECT_KEY_IDS";
 
 pub fn get_default_encryption_algorithm() -> Option<&'static str> {
     let env_default_algorithm = env::var(TINY_ENCRYPT_ENV_DEFAULT_ALGORITHM).ok();
@@ -33,8 +34,14 @@ pub fn get_key_id() -> Option<String> {
     env::var(TINY_ENCRYPT_ENV_KEY_ID).ok()
 }
 
+pub fn get_auto_select_key_ids() -> Option<Vec<String>> {
+    env::var(TINY_ENCRYPT_ENV_AUTO_SELECT_KEY_IDS).ok().map(|key_ids| {
+        key_ids.split(',').map(ToString::to_string).collect::<Vec<_>>()
+    })
+}
+
 pub fn get_default_compress() -> Option<bool> {
-    iff!(rust_util_env::is_env_off(TINY_ENCRYPT_ENV_DEFAULT_COMPRESS), Some(true), None)
+    env::var(TINY_ENCRYPT_ENV_DEFAULT_COMPRESS).ok().map(|val| util_env::is_on(&val))
 }
 
 pub fn get_no_progress() -> bool {

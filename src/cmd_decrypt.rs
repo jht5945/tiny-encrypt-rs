@@ -9,7 +9,10 @@ use std::time::{Instant, SystemTime};
 use clap::Args;
 use flate2::Compression;
 use openpgp_card::crypto_data::Cryptogram;
-use rust_util::{debugging, failure, iff, information, opt_result, opt_value_result, println_ex, simple_error, success, util_cmd, util_msg, util_size, util_time, warning, XResult};
+use rust_util::{
+    debugging, failure, iff, information, opt_result, opt_value_result, println_ex, simple_error, success,
+    util_cmd, util_msg, util_size, util_time, warning, XResult,
+};
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -28,7 +31,7 @@ use crate::consts::{
 };
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::{decode_base64, SecVec};
+use crate::util::SecVec;
 use crate::util_digest::DigestWrite;
 #[cfg(feature = "secure-enclave")]
 use crate::util_keychainkey;
@@ -105,10 +108,10 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
                 if len > 0 {
                     total_len += len;
                     success!(
-                        "Decrypt {} succeed, cost {} ms, file size {}",
+                        "Decrypt {} succeed, cost {} ms{}",
                         path.to_str().unwrap_or("N/A"),
                         start_decrypt_single.elapsed().as_millis(),
-                        util_size::get_display_size(len as i64)
+                        iff!(len == 0, "".to_string(), format!(", file size {}", util_size::get_display_size(len as i64)))
                     );
                 }
             }
@@ -222,6 +225,7 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
             success!("Temp file is changed, save file ...");
             drop(file_in);
             let mut meta = meta;
+            meta.latest_user_agent = Some(util::get_user_agent());
             meta.file_length = temp_file_content.len() as u64;
             meta.file_last_modified = util_time::get_current_millis() as u64;
             match &mut meta.file_edit_count {
@@ -488,7 +492,7 @@ fn try_decrypt_piv_key_rsa(config: &Option<TinyEncryptConfig>,
                            envelop: &TinyEncryptEnvelop,
                            pin: &Option<String>,
                            slot: &Option<String>) -> XResult<Vec<u8>> {
-    let encrypted_key_bytes = opt_result!(decode_base64(&envelop.encrypted_key), "Decode encrypt key failed: {}");
+    let encrypted_key_bytes = opt_result!(util::decode_base64(&envelop.encrypted_key), "Decode encrypt key failed: {}");
 
     let slot = util_piv::read_piv_slot(config, &envelop.kid, slot)?;
     let pin = util::read_pin(pin);
@@ -644,6 +648,15 @@ pub fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, co
             util::read_line("Press enter to continue: ");
         }
         return Ok(selected_envelop);
+    }
+
+    // auto select
+    if let Some(auto_select_key_ids) = util_env::get_auto_select_key_ids() {
+        for auto_select_key_id in auto_select_key_ids {
+            if let Some(envelop) = match_envelop_by_key_id(envelops, &Some(auto_select_key_id), config) {
+                return Ok(envelop);
+            }
+        }
     }
 
     envelops.iter().enumerate().for_each(|(i, envelop)| {

@@ -343,9 +343,9 @@ fn encrypt_envelop_shared_secret(cryptor: Cryptor,
 }
 
 fn encrypt_envelop_rsa(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
-    let pgp_public_key = opt_result!(crypto_rsa::parse_spki(&envelop.public_part), "Parse RSA public key failed: {}");
+    let rsa_public_key = opt_result!(crypto_rsa::parse_spki(&envelop.public_part), "Parse RSA public key failed: {}");
     let mut rng = rand::thread_rng();
-    let encrypted_key = opt_result!(pgp_public_key.encrypt(&mut rng, Pkcs1v15Encrypt, key), "RSA public key encrypt failed: {}");
+    let encrypted_key = opt_result!(rsa_public_key.encrypt(&mut rng, Pkcs1v15Encrypt, key), "RSA public key encrypt failed: {}");
     Ok(TinyEncryptEnvelop {
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),
