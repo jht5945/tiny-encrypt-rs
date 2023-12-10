@@ -30,7 +30,7 @@ impl Ord for ConfigProfile {
 
 impl PartialOrd for ConfigProfile {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.profiles.partial_cmp(&other.profiles)
+        Some(self.cmp(other))
     }
 }
 
@@ -98,7 +98,6 @@ fn process_kid(kid: &str) -> String {
 fn config_profiles(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XResult<()> {
     let mut reverse_map = HashMap::new();
     for (p, v) in &config.profiles {
-        let p = p;
         let mut v2 = v.clone();
         v2.sort();
         let vs = v2.join(",");

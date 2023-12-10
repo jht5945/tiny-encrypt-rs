@@ -109,6 +109,19 @@ pub fn simple_kdf(input: &[u8]) -> Vec<u8> {
     input
 }
 
+pub fn to_pem(bs: &[u8], name: &str) -> String {
+    let bs_base64 = encode_base64(bs);
+    let mut pem = String::with_capacity(bs.len() + 64);
+    pem.push_str(&format!("-----BEGIN {}-----", name));
+    for (i, c) in bs_base64.chars().enumerate() {
+        if i % 64 == 0 { pem.push('\n'); }
+        pem.push(c);
+    }
+    if !pem.ends_with('\n') { pem.push('\n'); }
+    pem.push_str(&format!("-----END {}-----", name));
+    pem
+}
+
 pub fn decode_base64(input: &str) -> XResult<Vec<u8>> {
     Ok(general_purpose::STANDARD.decode(input)?)
 }

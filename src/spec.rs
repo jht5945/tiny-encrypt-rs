@@ -85,6 +85,9 @@ pub enum TinyEncryptEnvelopType {
     // PIV ECDH P384
     #[serde(rename = "piv-p384", alias = "ecdh-p384")]
     PivP384,
+    // PIV RSA
+    #[serde(rename = "piv-rsa")]
+    PivRsa,
     // KMS, tiny-encrypt-rs is not supported
     #[serde(rename = "kms")]
     Kms,
@@ -104,6 +107,7 @@ impl TinyEncryptEnvelopType {
             TinyEncryptEnvelopType::Age => "age",
             TinyEncryptEnvelopType::PivP256 => "piv-p256",
             TinyEncryptEnvelopType::PivP384 => "piv-p384",
+            TinyEncryptEnvelopType::PivRsa => "piv-rsa",
             TinyEncryptEnvelopType::Kms => "kms",
         }
     }
@@ -117,6 +121,7 @@ impl TinyEncryptEnvelopType {
             TinyEncryptEnvelopType::Age => false,
             TinyEncryptEnvelopType::PivP256 => false,
             TinyEncryptEnvelopType::PivP384 => false,
+            TinyEncryptEnvelopType::PivRsa => false,
             TinyEncryptEnvelopType::Kms => true,
         }
     }

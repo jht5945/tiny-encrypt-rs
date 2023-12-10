@@ -15,26 +15,30 @@ Specification: [Tiny Encrypt Spec V1.1](https://github.com/OpenWebStandard/tiny-
 Repository address: https://git.hatter.ink/hatter/tiny-encrypt-rs mirror https://github.com/jht5945/tiny-encrypt-rs
 
 Set default encryption algorithm:
+
 ```shell
 export TINY_ENCRYPT_DEFAULT_ALGORITHM='AES' # or CHACHA20
 ```
 
 Compile only encrypt:
+
 ```shell
 cargo build --release --no-default-features
 ```
 
 Edit encrypted file:
+
 ```shell
 tiny-encrypt decrypt --edit-file sample.txt.tinyenc 
 ```
+
 Read environment `EDITOR` or `SECURE_EDITOR` to edit file, `SECURE_EDITOR` write encrypted file to temp file.
 
 Secure editor command format:
+
 ```shell
 $SECURE_EDITOR <temp-file-name> "aes-256-gcm" <temp-key-hex> <temp-nonce-hex>
 ```
-
 
 <br>
 
@@ -78,6 +82,7 @@ Supported PKI encryption types:
 | piv-p256      | ECDH(secp256r1) | PIV Slot (Previous `ecdh`)              |
 | piv-p384      | ECDH(secp384r1) | PIV Slot (Previous `ecdh-p384`)         |
 | key-p256      | ECDH(secp256r1) | Key Stored in Secure Enclave            |
+| piv-rsa       | PKCS1-v1.5      | PIV Slot                                |
 
 Smart Card(Yubikey) protected ECDH Encryption description:
 

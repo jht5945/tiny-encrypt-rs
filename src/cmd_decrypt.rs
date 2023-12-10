@@ -28,12 +28,12 @@ use crate::consts::{
 };
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
-use crate::util::SecVec;
+use crate::util::{decode_base64, SecVec};
 use crate::util_digest::DigestWrite;
-#[cfg(feature = "macos")]
-use crate::util_keychainstatic;
 #[cfg(feature = "secure-enclave")]
 use crate::util_keychainkey;
+#[cfg(feature = "macos")]
+use crate::util_keychainstatic;
 use crate::util_progress::Progress;
 use crate::wrap_key::WrapKey;
 
@@ -432,21 +432,22 @@ pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
                        pin: &Option<String>,
                        slot: &Option<String>) -> XResult<Vec<u8>> {
     match envelop.r#type {
-        TinyEncryptEnvelopType::PgpRsa => try_decrypt_key_pgp(envelop, pin),
+        TinyEncryptEnvelopType::PgpRsa => try_decrypt_key_pgp_rsa(envelop, pin),
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
         #[cfg(feature = "macos")]
         TinyEncryptEnvelopType::StaticX25519 => try_decrypt_key_ecdh_static_x25519(config, envelop),
-        TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::PivP384 => try_decrypt_key_ecdh(config, envelop, pin, slot),
+        TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::PivP384 => try_decrypt_piv_key_ecdh(config, envelop, pin, slot),
         #[cfg(feature = "secure-enclave")]
         TinyEncryptEnvelopType::KeyP256 => try_decrypt_se_key_ecdh(config, envelop),
+        TinyEncryptEnvelopType::PivRsa => try_decrypt_piv_key_rsa(config, envelop, pin, slot),
         unknown_type => simple_error!("Unknown or unsupported type: {}", unknown_type.get_name()),
     }
 }
 
-fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
-                        envelop: &TinyEncryptEnvelop,
-                        pin: &Option<String>,
-                        slot: &Option<String>) -> XResult<Vec<u8>> {
+fn try_decrypt_piv_key_ecdh(config: &Option<TinyEncryptConfig>,
+                            envelop: &TinyEncryptEnvelop,
+                            pin: &Option<String>,
+                            slot: &Option<String>) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
     let (cryptor, algo_id) = match wrap_key.header.enc.as_str() {
         ENC_AES256_GCM_P256 => (Cryptor::Aes256Gcm, AlgorithmId::EccP256),
@@ -481,6 +482,42 @@ fn try_decrypt_key_ecdh(config: &Option<TinyEncryptConfig>,
     util::zeroize(key);
     util::zeroize(shared_secret);
     Ok(decrypted_key)
+}
+
+fn try_decrypt_piv_key_rsa(config: &Option<TinyEncryptConfig>,
+                           envelop: &TinyEncryptEnvelop,
+                           pin: &Option<String>,
+                           slot: &Option<String>) -> XResult<Vec<u8>> {
+    let encrypted_key_bytes = opt_result!(decode_base64(&envelop.encrypted_key), "Decode encrypt key failed: {}");
+
+    let slot = util_piv::read_piv_slot(config, &envelop.kid, slot)?;
+    let pin = util::read_pin(pin);
+
+    let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
+    let slot_id = util_piv::get_slot_id(&slot)?;
+    opt_result!(yk.verify_pin(pin.as_bytes()), "YubiKey verify pin failed: {}");
+
+    let key = opt_result!(decrypt_data(
+                &mut yk,
+                &encrypted_key_bytes,
+                AlgorithmId::Rsa2048,
+                slot_id,
+            ), "Decrypt via PIV card failed: {}");
+    let key_bytes = key.as_slice();
+    if !key_bytes.starts_with(&[0x00, 0x02]) {
+        return simple_error!("RSA decrypted in error format: {}", hex::encode(key_bytes));
+    }
+    let after_2nd_0_bytes = key_bytes.iter()
+        .skip(1)
+        .skip_while(|b| **b != 0x00)
+        .skip(1)
+        .copied()
+        .collect::<Vec<_>>();
+
+    information!(">>>>>>>> {:?}", &after_2nd_0_bytes);
+    util::zeroize(pin);
+    util::zeroize(key);
+    Ok(after_2nd_0_bytes)
 }
 
 #[cfg(feature = "secure-enclave")]
@@ -571,7 +608,7 @@ fn try_decrypt_key_ecdh_static_x25519(config: &Option<TinyEncryptConfig>, envelo
     Ok(decrypted_key)
 }
 
-fn try_decrypt_key_pgp(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
+fn try_decrypt_key_pgp_rsa(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -> XResult<Vec<u8>> {
     let mut pgp = util_pgp::get_openpgp()?;
     let mut trans = opt_result!(pgp.transaction(), "Connect OpenPGP card failed: {}");
 

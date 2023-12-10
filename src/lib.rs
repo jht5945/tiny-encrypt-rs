@@ -35,13 +35,11 @@ mod util;
 mod util_env;
 mod util_digest;
 mod util_progress;
-#[cfg(feature = "decrypt")]
+#[cfg(feature = "smartcard")]
 mod util_piv;
-#[cfg(feature = "decrypt")]
+#[cfg(feature = "smartcard")]
 mod util_pgp;
-mod util_p256;
-mod util_p384;
-mod util_x25519;
+mod util_ecdh;
 mod compress;
 mod config;
 mod spec;

@@ -56,7 +56,7 @@ impl TinyEncryptConfig {
     pub fn load(file: &str) -> XResult<Self> {
         let resolved_file = resolve_file_path(file);
         let config_contents = opt_result!(
-            fs::read_to_string(&resolved_file), "Read config file: {}, failed: {}", file
+            fs::read_to_string(resolved_file), "Read config file: {}, failed: {}", file
         );
         let mut config: TinyEncryptConfig = opt_result!(
             serde_json::from_str(&config_contents),"Parse config file: {}, failed: {}", file);

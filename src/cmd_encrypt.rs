@@ -10,7 +10,7 @@ use rsa::Pkcs1v15Encrypt;
 use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_size, XResult};
 use rust_util::util_time::UnixEpochTime;
 
-use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env, util_p256, util_p384, util_x25519};
+use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::consts::{
@@ -24,6 +24,7 @@ use crate::spec::{
     EncEncryptedMeta, EncMetadata,
     TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta,
 };
+use crate::util_ecdh::{ecdh_p256, ecdh_p384, ecdh_x25519};
 use crate::util_progress::Progress;
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
@@ -265,14 +266,14 @@ fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfig
     let mut encrypted_envelops = vec![];
     for envelop in envelops {
         match envelop.r#type {
-            TinyEncryptEnvelopType::PgpRsa => {
-                encrypted_envelops.push(encrypt_envelop_pgp(key, envelop)?);
+            TinyEncryptEnvelopType::PgpRsa | TinyEncryptEnvelopType::PivRsa => {
+                encrypted_envelops.push(encrypt_envelop_rsa(key, envelop)?);
             }
             TinyEncryptEnvelopType::PgpX25519 | TinyEncryptEnvelopType::StaticX25519 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh_x25519(cryptor, key, envelop)?);
             }
             TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::KeyP256 => {
-                encrypted_envelops.push(encrypt_envelop_ecdh(cryptor, key, envelop)?);
+                encrypted_envelops.push(encrypt_envelop_ecdh_p256(cryptor, key, envelop)?);
             }
             TinyEncryptEnvelopType::PivP384 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh_p384(cryptor, key, envelop)?);
@@ -283,9 +284,9 @@ fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfig
     Ok(encrypted_envelops)
 }
 
-fn encrypt_envelop_ecdh(cryptor: Cryptor, key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
+fn encrypt_envelop_ecdh_p256(cryptor: Cryptor, key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let public_key_point_hex = &envelop.public_part;
-    let (shared_secret, ephemeral_spki) = util_p256::compute_p256_shared_secret(public_key_point_hex)?;
+    let (shared_secret, ephemeral_spki) = ecdh_p256::compute_p256_shared_secret(public_key_point_hex)?;
     let enc_type = match cryptor {
         Cryptor::Aes256Gcm => ENC_AES256_GCM_P256,
         Cryptor::ChaCha20Poly1305 => ENC_CHACHA20_POLY1305_P256,
@@ -295,7 +296,7 @@ fn encrypt_envelop_ecdh(cryptor: Cryptor, key: &[u8], envelop: &TinyEncryptConfi
 
 fn encrypt_envelop_ecdh_p384(cryptor: Cryptor, key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let public_key_point_hex = &envelop.public_part;
-    let (shared_secret, ephemeral_spki) = util_p384::compute_p384_shared_secret(public_key_point_hex)?;
+    let (shared_secret, ephemeral_spki) = ecdh_p384::compute_p384_shared_secret(public_key_point_hex)?;
     let enc_type = match cryptor {
         Cryptor::Aes256Gcm => ENC_AES256_GCM_P384,
         Cryptor::ChaCha20Poly1305 => ENC_CHACHA20_POLY1305_P384,
@@ -305,7 +306,7 @@ fn encrypt_envelop_ecdh_p384(cryptor: Cryptor, key: &[u8], envelop: &TinyEncrypt
 
 fn encrypt_envelop_ecdh_x25519(cryptor: Cryptor, key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
     let public_key_point_hex = &envelop.public_part;
-    let (shared_secret, ephemeral_spki) = util_x25519::compute_x25519_shared_secret(public_key_point_hex)?;
+    let (shared_secret, ephemeral_spki) = ecdh_x25519::compute_x25519_shared_secret(public_key_point_hex)?;
     let enc_type = match cryptor {
         Cryptor::Aes256Gcm => ENC_AES256_GCM_X25519,
         Cryptor::ChaCha20Poly1305 => ENC_CHACHA20_POLY1305_X25519,
@@ -341,10 +342,10 @@ fn encrypt_envelop_shared_secret(cryptor: Cryptor,
     })
 }
 
-fn encrypt_envelop_pgp(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
-    let pgp_public_key = opt_result!(crypto_rsa::parse_spki(&envelop.public_part), "Parse PGP public key failed: {}");
+fn encrypt_envelop_rsa(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
+    let pgp_public_key = opt_result!(crypto_rsa::parse_spki(&envelop.public_part), "Parse RSA public key failed: {}");
     let mut rng = rand::thread_rng();
-    let encrypted_key = opt_result!(pgp_public_key.encrypt(&mut rng, Pkcs1v15Encrypt, key), "PGP public key encrypt failed: {}");
+    let encrypted_key = opt_result!(pgp_public_key.encrypt(&mut rng, Pkcs1v15Encrypt, key), "RSA public key encrypt failed: {}");
     Ok(TinyEncryptEnvelop {
         r#type: envelop.r#type,
         kid: envelop.kid.clone(),

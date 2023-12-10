@@ -11,7 +11,7 @@ pub fn format_envelop(envelop: &TinyEncryptEnvelop, config: &Option<TinyEncryptC
     let envelop_desc = get_envelop_desc(envelop, &config_envelop);
     let desc = envelop_desc.as_ref()
         .map(|desc| format!(", Desc: {}", desc))
-        .unwrap_or_else(|| "".to_string());
+        .unwrap_or_default();
     format!("{}{}{}", with_width_type(&envelop.r#type.get_upper_name()), envelop_kid, desc)
 }
 
