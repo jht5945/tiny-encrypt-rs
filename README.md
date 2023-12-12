@@ -107,3 +107,17 @@ Smart Card(Yubikey) protected ECDH Encryption description:
                                Decrypt using derived key from restored Shared Secret
 ```
 
+Environment
+
+| KEY                              | Comment                                     |
+|----------------------------------|---------------------------------------------|
+| TINY_ENCRYPT_DEFAULT_ALGORITHM   | Encryption algorithm, `aes` or `chacha20`   |
+| TINY_ENCRYPT_DEFAULT_COMPRESS    | File compress, `1` or `on`, default `false` |
+| TINY_ENCRYPT_NO_PROGRESS         | Do not display progress bar                 |
+| TINY_ENCRYPT_PIN                 | PIV Card PIN                                |
+| TINY_ENCRYPT_KEY_ID              | Default Key ID                              |
+| TINY_ENCRYPT_AUTO_SELECT_KEY_IDS | Auto select Key IDs                         |
+| SECURE_EDITOR                    | Secure Editor                               |
+| EDITOR                           | Editor (Plaintext)                          |
+
+
