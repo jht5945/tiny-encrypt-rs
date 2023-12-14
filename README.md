@@ -1,11 +1,11 @@
 # tiny-encrypt-rs
 
-**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) is
+**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or MacBook is
 required, the key MUST support PIV or OpenPGP.
 
 ![](https://cdn.hatter.ink/doc/7684_4DB4452911E2A25AB993429AA7FFCD65/yubikey-5-family.png)
 
-Tiny encrypt for Rust
+Tiny Encrypt written in Rust Programming Language
 
 Specification: [Tiny Encrypt Spec V1.1](https://github.com/OpenWebStandard/tiny-encrypt-format-spec/blob/main/TinyEncryptSpecv1.1.md)
 
@@ -46,15 +46,18 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
 
 ```json
 {
+  "environment": {
+    "TINY_ENCRYPT_DEFAULT_ALGORITHM": "AES or CHACHA20"
+  },
   "envelops": [
     {
-      "type": "pgp",
+      "type": "pgp-rsa",
       "kid": "KID-1",
       "desc": "this is key 001",
       "publicPart": "----- BEGIN PUBLIC KEY ..."
     },
     {
-      "type": "ecdh",
+      "type": "piv-p256",
       "kid": "KID-2",
       "desc": "this is key 002",
       "publicPart": "04..."
@@ -78,13 +81,13 @@ Supported PKI encryption types:
 |---------------|-----------------|-----------------------------------------|
 | pgp-rsa       | PKCS1-v1.5      | OpenPGP Encryption Key (Previous `pgp`) |
 | pgp-x25519    | ECDH(X25519)    | OpenPGP Encryption Key                  |
-| static-x25519 | ECDH(X25519)    | Key Stored in KeyChain                  |
+| static-x25519 | ECDH(X25519)    | Key Stored in macOS Keychain Access     |
 | piv-p256      | ECDH(secp256r1) | PIV Slot (Previous `ecdh`)              |
 | piv-p384      | ECDH(secp384r1) | PIV Slot (Previous `ecdh-p384`)         |
-| key-p256      | ECDH(secp256r1) | Key Stored in Secure Enclave            |
+| key-p256      | ECDH(secp256r1) | Key Stored in macOS Secure Enclave      |
 | piv-rsa       | PKCS1-v1.5      | PIV Slot                                |
 
-Smart Card(Yubikey) protected ECDH Encryption description:
+Smart Card(Yubikey) protected ECDH Encryption description as below:
 
 ```text
 ┌───────────────────┐                     ┌───────────────────────────┐

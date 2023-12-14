@@ -37,6 +37,7 @@ use crate::util_digest::DigestWrite;
 use crate::util_keychainkey;
 #[cfg(feature = "macos")]
 use crate::util_keychainstatic;
+use crate::util_keychainstatic::KeychainKey;
 use crate::util_progress::Progress;
 use crate::wrap_key::WrapKey;
 
@@ -542,10 +543,16 @@ fn try_decrypt_se_key_ecdh(config: &Option<TinyEncryptConfig>,
     if config_envelop_args.is_empty() {
         return simple_error!("Not enough arguments for: {}", &envelop.kid);
     }
-    let private_key_base64 = &config_envelop_args[0];
+
+    let private_key_base64 = if let Ok(keychain_key) = KeychainKey::parse(&config_envelop_args[0]) {
+        let key = opt_value_result!(keychain_key.get_password()?, "Key: {} not found", &keychain_key.to_str());
+        opt_result!(String::from_utf8(key), "Parse key failed: {}")
+    } else {
+        config_envelop_args[0].clone()
+    };
 
     let shared_secret = opt_result!(util_keychainkey::decrypt_data(
-                private_key_base64,
+                &private_key_base64,
                 &e_pub_key_bytes
             ), "Decrypt via secure enclave failed: {}");
     let key = util::simple_kdf(shared_secret.as_slice());
@@ -595,13 +602,18 @@ fn try_decrypt_key_ecdh_static_x25519(config: &Option<TinyEncryptConfig>, envelo
     let config_envelop = opt_value_result!(
         config.find_by_kid(&envelop.kid), "Cannot find config for: {}", &envelop.kid);
     let config_envelop_args = opt_value_result!(&config_envelop.args, "No arguments found for: {}", &envelop.kid);
-    if config_envelop_args.len() < 3 {
+    if config_envelop_args.len() != 1 && config_envelop_args.len() != 3 {
         return simple_error!("Not enough arguments for: {}", &envelop.kid);
     }
-    let service_name = &config_envelop_args[1];
-    let key_name = &config_envelop_args[2];
+
+    let keychain_key = if config_envelop_args.len() == 1 {
+        KeychainKey::parse(&config_envelop_args[0])?
+    } else {
+        KeychainKey::from(&config_envelop_args[0], &config_envelop_args[1], &config_envelop_args[2])
+    };
+
     let shared_secret = opt_result!(
-        util_keychainstatic::decrypt_data(service_name, key_name, &e_pub_key_bytes), "Decrypt static x25519 failed: {}");
+        util_keychainstatic::decrypt_data(&keychain_key, &e_pub_key_bytes), "Decrypt static x25519 failed: {}");
 
     let key = util::simple_kdf(shared_secret.as_slice());
     let key_nonce = KeyNonce { k: &key, n: &wrap_key.nonce };
