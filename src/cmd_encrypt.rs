@@ -82,8 +82,9 @@ pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
     let mut failed_count = 0;
     let mut total_len = 0_u64;
     for path in &cmd_encrypt.paths {
+        let path = config.resolve_path_namespace(path, false);
         let start_encrypt_single = Instant::now();
-        match encrypt_single(path, &envelops, &cmd_encrypt) {
+        match encrypt_single(&path, &envelops, &cmd_encrypt) {
             Ok(len) => {
                 total_len += len;
                 if len > 0 { succeed_count += 1; } else { skipped_count += 1; }

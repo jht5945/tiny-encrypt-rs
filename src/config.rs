@@ -1,11 +1,13 @@
+use std::{env, fs};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::{env, fs};
+use std::path::PathBuf;
 
-use rust_util::{debugging, opt_result, simple_error, XResult};
+use rust_util::{debugging, opt_result, simple_error, warning, XResult};
 use rust_util::util_file::resolve_file_path;
 use serde::{Deserialize, Serialize};
 
+use crate::consts::TINY_ENC_FILE_EXT;
 use crate::spec::TinyEncryptEnvelopType;
 
 /// Config file sample:
@@ -34,9 +36,17 @@ use crate::spec::TinyEncryptEnvelopType;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TinyEncryptConfig {
-    pub environment: Option<HashMap<String, String>>,
+    pub environment: Option<HashMap<String, StringOrVecString>>,
+    pub namespaces: Option<HashMap<String, String>>,
     pub envelops: Vec<TinyEncryptConfigEnvelop>,
     pub profiles: HashMap<String, Vec<String>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StringOrVecString {
+    String(String),
+    Vec(Vec<String>),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -78,12 +88,40 @@ impl TinyEncryptConfig {
 
         if let Some(environment) = &config.environment {
             for (k, v) in environment {
+                let v = match v {
+                    StringOrVecString::String(s) => { s.to_string() }
+                    StringOrVecString::Vec(vs) => { vs.join(",") }
+                };
                 debugging!("Set env: {}={}", k, v);
                 env::set_var(k, v);
             }
         }
 
         Ok(config)
+    }
+
+    pub fn resolve_path_namespace(&self, path: &PathBuf, append_te: bool) -> PathBuf {
+        if let Some(path_str) = path.to_str() {
+            if path_str.starts_with(':') {
+                let namespace = path_str.chars().skip(1)
+                    .take_while(|c| *c != ':').collect::<String>();
+                let mut filename = path_str.chars().skip(1)
+                    .skip_while(|c| *c != ':').skip(1).collect::<String>();
+                if append_te && !filename.ends_with(TINY_ENC_FILE_EXT) {
+                    filename.push_str(TINY_ENC_FILE_EXT);
+                }
+
+                match self.find_namespace(&namespace) {
+                    None => warning!("Namespace: {} not found", &namespace),
+                    Some(dir) => return PathBuf::from(dir).join(&filename),
+                }
+            }
+        }
+        path.clone()
+    }
+
+    pub fn find_namespace(&self, prefix: &str) -> Option<&String> {
+        self.namespaces.as_ref().and_then(|m| m.get(prefix))
     }
 
     pub fn find_first_arg_by_kid(&self, kid: &str) -> Option<&String> {
@@ -167,5 +205,12 @@ impl TinyEncryptConfig {
             Ordering::Equal
         });
         Ok(envelops)
+    }
+}
+
+pub fn resolve_path_namespace(config: &Option<TinyEncryptConfig>, path: &PathBuf, append_te: bool) -> PathBuf {
+    match config {
+        None => path.clone(),
+        Some(config) => config.resolve_path_namespace(path, append_te),
     }
 }

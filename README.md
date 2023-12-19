@@ -49,6 +49,9 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
   "environment": {
     "TINY_ENCRYPT_DEFAULT_ALGORITHM": "AES or CHACHA20"
   },
+  "namespaces": {
+    "name": "/Users/example/.name"
+  },
   "envelops": [
     {
       "type": "pgp-rsa",

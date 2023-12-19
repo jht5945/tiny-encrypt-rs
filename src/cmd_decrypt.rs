@@ -20,7 +20,7 @@ use yubikey::piv::{AlgorithmId, decrypt_data};
 use yubikey::YubiKey;
 use zeroize::Zeroize;
 
-use crate::{cmd_encrypt, consts, crypto_simple, util, util_enc_file, util_env, util_envelop, util_file, util_pgp, util_piv};
+use crate::{cmd_encrypt, config, consts, crypto_simple, util, util_enc_file, util_env, util_envelop, util_file, util_pgp, util_piv};
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
 use crate::consts::{
@@ -102,8 +102,9 @@ pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     let key_id = cmd_decrypt.key_id.clone().or_else(util_env::get_key_id);
 
     for path in &cmd_decrypt.paths {
+        let path = config::resolve_path_namespace(&config, path, true);
         let start_decrypt_single = Instant::now();
-        match decrypt_single(&config, path, &pin, &key_id, &cmd_decrypt.slot, &cmd_decrypt) {
+        match decrypt_single(&config, &path, &pin, &key_id, &cmd_decrypt.slot, &cmd_decrypt) {
             Ok(len) => {
                 succeed_count += 1;
                 if len > 0 {
@@ -328,7 +329,12 @@ fn get_file_editor() -> (bool, String) {
 fn create_edit_temp_file(file_content: &[u8], path_out: &str) -> XResult<PathBuf> {
     let temp_dir = temp_dir();
     let current_millis = util_time::get_current_millis();
-    let temp_file = temp_dir.join(format!("tmp_file_{}_{}", current_millis, path_out));
+    let file_name = if path_out.contains('/') {
+        path_out.split('/').last().unwrap().to_string()
+    } else {
+        path_out.to_string()
+    };
+    let temp_file = temp_dir.join(format!("tmp_file_{}_{}", current_millis, file_name));
     information!("Temp file: {}", temp_file.display());
     opt_result!(fs::write(&temp_file, file_content), "Write temp file failed: {}");
     Ok(temp_file)

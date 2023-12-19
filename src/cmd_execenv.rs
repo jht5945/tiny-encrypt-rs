@@ -8,7 +8,7 @@ use rust_util::{debugging, iff, information, opt_result, simple_error, util_cmd,
 use serde_json::Value;
 use zeroize::Zeroize;
 
-use crate::{consts, util, util_env};
+use crate::{config, consts, util, util_env};
 use crate::cmd_decrypt::{decrypt_limited_content_to_vec, select_envelop, try_decrypt_key};
 use crate::config::TinyEncryptConfig;
 use crate::consts::TINY_ENC_CONFIG_FILE;
@@ -52,6 +52,7 @@ pub fn exec_env(cmd_exec_env: CmdExecEnv) -> XResult<()> {
     let key_id = cmd_exec_env.key_id.clone().or_else(util_env::get_key_id);
 
     let path = PathBuf::from(&cmd_exec_env.file_name);
+    let path = config::resolve_path_namespace(&config, &path, true);
     let path_display = format!("{}", &path.display());
     util::require_tiny_enc_file_and_exists(&path)?;
 

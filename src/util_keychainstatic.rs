@@ -101,9 +101,9 @@ impl KeychainKey {
         let mut s = String::new();
         s.push_str(KEYCHAIN_KEY_PREFIX);
         s.push_str(&self.keychain_name);
-        s.push_str(":");
+        s.push(':');
         s.push_str(&self.service_name);
-        s.push_str(":");
+        s.push(':');
         s.push_str(&self.key_name);
         s
     }
@@ -123,7 +123,7 @@ impl KeychainKey {
 
     pub fn set_password(&self, password: &[u8]) -> XResult<()> {
         let sec_keychain = self.get_keychain()?;
-        if let Ok(_) = sec_keychain.find_generic_password(&self.service_name, &self.key_name) {
+        if sec_keychain.find_generic_password(&self.service_name, &self.key_name).is_ok() {
             return simple_error!("Password {}.{} exists", &self.service_name, &self.key_name);
         }
         opt_result!(
