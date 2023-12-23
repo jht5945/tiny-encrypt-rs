@@ -1,9 +1,14 @@
+use pqcrypto_kyber::kyber1024;
+use pqcrypto_kyber::kyber1024::Ciphertext as Kyber1024Ciphertext;
+use pqcrypto_kyber::kyber1024::PublicKey as Kyber1024PublicKey;
+use pqcrypto_kyber::kyber1024::SecretKey as Kyber1024SecretKey;
 use rust_util::{debugging, opt_result, opt_value_result, simple_error, XResult};
 use security_framework::os::macos::keychain::SecKeychain;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
 const X2559_PLAIN_PREFIX: &str = "x25519-plain:";
+const KYBER1024_PLAIN_PREFIX: &str = "kyber1024-plain:";
 const KEYCHAIN_KEY_PREFIX: &str = "keychain:";
 
 pub struct KeychainKey {
@@ -12,48 +17,112 @@ pub struct KeychainKey {
     pub key_name: String,
 }
 
-
-pub struct X25519StaticSecret {
-    pub secret: Vec<u8>,
+pub enum KeychainStaticSecretAlgorithm {
+    X25519,
+    Kyber1024,
 }
 
-impl Zeroize for X25519StaticSecret {
+impl KeychainStaticSecretAlgorithm {
+    pub fn prefix(&self) -> &'static str {
+        match self {
+            Self::X25519 => X2559_PLAIN_PREFIX,
+            Self::Kyber1024 => KYBER1024_PLAIN_PREFIX,
+        }
+    }
+    pub fn from_prefix(str: &str) -> Option<Self> {
+        if str.starts_with(X2559_PLAIN_PREFIX) {
+            Some(Self::X25519)
+        } else if str.starts_with(KYBER1024_PLAIN_PREFIX) {
+            Some(Self::Kyber1024)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct KeychainStaticSecret {
+    pub algo: KeychainStaticSecretAlgorithm,
+    pub secret: Vec<u8>,
+    pub public: Option<Vec<u8>>,
+}
+
+impl Zeroize for KeychainStaticSecret {
     fn zeroize(&mut self) {
         self.secret.zeroize();
     }
 }
 
-impl X25519StaticSecret {
+impl KeychainStaticSecret {
     pub fn parse_bytes(bs: &[u8]) -> XResult<Self> {
-        let key_str = opt_result!(String::from_utf8(bs.to_vec()), "Parse static x25519 failed: {}");
+        let key_str = opt_result!(String::from_utf8(bs.to_vec()), "Parse static secret failed: {}");
         Self::parse(&key_str)
     }
 
     pub fn parse(key: &str) -> XResult<Self> {
-        if !key.starts_with(X2559_PLAIN_PREFIX) {
-            return simple_error!("Not X25519 plain key");
-        }
-        let extract_key_hex = &key[X2559_PLAIN_PREFIX.len()..];
-        let extract_key = opt_result!(hex::decode(extract_key_hex), "Decode X25519 plain key failed: {}");
+        let algo = opt_value_result!(
+            KeychainStaticSecretAlgorithm::from_prefix(key), "Unknown static secret: {}", key);
+        let extract_key_hex = &key[algo.prefix().len()..];
+        let extract_key = opt_result!(hex::decode(extract_key_hex), "Decode static secret plain key failed: {}");
+        let (secret, public) = match algo {
+            KeychainStaticSecretAlgorithm::X25519 => {
+                (extract_key, None)
+            }
+            KeychainStaticSecretAlgorithm::Kyber1024 => {
+                // pub const PQCLEAN_KYBER1024_CLEAN_CRYPTO_SECRETKEYBYTES: usize = 3168;
+                // pub const PQCLEAN_KYBER1024_CLEAN_CRYPTO_PUBLICKEYBYTES: usize = 1568;
+                let secret_key_bytes_len = 3168;
+                let public_key_bytes_len = 1568;
+                if extract_key.len() != secret_key_bytes_len + public_key_bytes_len {
+                    return simple_error!("Bad kyber1024 secret and public keys.");
+                }
+                (extract_key[0..secret_key_bytes_len].to_vec(), Some(extract_key[secret_key_bytes_len..].to_vec()))
+            }
+        };
         Ok(Self {
-            secret: extract_key,
+            algo,
+            secret,
+            public,
         })
     }
 
     pub fn to_str(&self) -> String {
         let mut v = String::new();
-        v.push_str(X2559_PLAIN_PREFIX);
+        v.push_str(self.algo.prefix());
         v.push_str(&hex::encode(&self.secret));
+        if let Some(public) = &self.public {
+            v.push_str(&hex::encode(public));
+        }
         v
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Self {
+    pub fn from_x25519_bytes(secret: &[u8]) -> Self {
+        Self::from_bytes(KeychainStaticSecretAlgorithm::X25519, secret, None)
+    }
+
+    pub fn from_kyber1024_bytes(secret: &[u8], public: &[u8]) -> Self {
+        Self::from_bytes(KeychainStaticSecretAlgorithm::Kyber1024, secret, Some(public))
+    }
+
+    pub fn from_bytes(algo: KeychainStaticSecretAlgorithm, secret: &[u8], public: Option<&[u8]>) -> Self {
         Self {
-            secret: bytes.to_vec(),
+            algo,
+            secret: secret.to_vec(),
+            public: public.map(|p| p.to_vec()),
         }
     }
 
-    pub fn to_static_secret(&self) -> XResult<StaticSecret> {
+    pub fn to_kyber1204_static_secret(&self) -> XResult<(Kyber1024SecretKey, Kyber1024PublicKey)> {
+        use pqcrypto_traits::kem::{PublicKey, SecretKey};
+        let secret_key = opt_result!(Kyber1024SecretKey::from_bytes(&self.secret),
+            "Parse kyber1204 private key failed: {}");
+        let public_key = opt_result!(match &self.public {
+            None => return simple_error!("Kyber1204 public key not found."),
+            Some(public) => Kyber1024PublicKey::from_bytes(public),
+        }, "Parse kyber1204 public key failed: {}");
+        Ok((secret_key, public_key))
+    }
+
+    pub fn to_x25519_static_secret(&self) -> XResult<StaticSecret> {
         let secret_slice = self.secret.as_slice();
         let mut inner_secret: [u8; 32] = opt_result!(secret_slice.try_into(), "X25519 secret key error: {}");
         let static_secret = StaticSecret::from(inner_secret);
@@ -61,8 +130,8 @@ impl X25519StaticSecret {
         Ok(static_secret)
     }
 
-    pub fn to_public_key(&self) -> XResult<PublicKey> {
-        let static_secret = self.to_static_secret()?;
+    pub fn to_x25519_public_key(&self) -> XResult<PublicKey> {
+        let static_secret = self.to_x25519_static_secret()?;
         let public_key: PublicKey = (&static_secret).into();
         Ok(public_key)
     }
@@ -141,11 +210,11 @@ impl KeychainKey {
     }
 }
 
-pub fn decrypt_data(keychain_key: &KeychainKey, ephemeral_public_key_bytes: &[u8]) -> XResult<Vec<u8>> {
+pub fn decrypt_x25519_data(keychain_key: &KeychainKey, ephemeral_public_key_bytes: &[u8]) -> XResult<Vec<u8>> {
     let static_x25519 = opt_value_result!(keychain_key.get_password()?, "Static X25519 not found: {}", &keychain_key.to_str());
 
-    let x25519_static_secret = X25519StaticSecret::parse_bytes(&static_x25519)?;
-    let static_secret = x25519_static_secret.to_static_secret()?;
+    let x25519_static_secret = KeychainStaticSecret::parse_bytes(&static_x25519)?;
+    let static_secret = x25519_static_secret.to_x25519_static_secret()?;
     let inner_ephemeral_public_key: [u8; 32] = opt_result!(
         ephemeral_public_key_bytes.try_into(), "X25519 public key error: {}");
     let ephemeral_public_key = PublicKey::from(inner_ephemeral_public_key);
@@ -154,10 +223,33 @@ pub fn decrypt_data(keychain_key: &KeychainKey, ephemeral_public_key_bytes: &[u8
     Ok(shared_secret.as_bytes().to_vec())
 }
 
+pub fn decrypt_kyber1204_data(keychain_key: &KeychainKey, ephemeral_public_key_bytes: &[u8]) -> XResult<Vec<u8>> {
+    use pqcrypto_traits::kem::{Ciphertext, SharedSecret};
+    let static_kyber1204 = opt_value_result!(keychain_key.get_password()?, "Static Kyber1204 not found: {}", &keychain_key.to_str());
+
+    let kyber1204_static_secret = KeychainStaticSecret::parse_bytes(&static_kyber1204)?;
+    let (static_secret, _) = kyber1204_static_secret.to_kyber1204_static_secret()?;
+    let ciphertext = opt_result!(
+        Kyber1024Ciphertext::from_bytes(ephemeral_public_key_bytes), "Parse kyber1204 ciphertext failed: {}");
+    let shared_secret = kyber1024::decapsulate(&ciphertext, &static_secret);
+
+    Ok(shared_secret.as_bytes().to_vec())
+}
+
 pub fn generate_static_x25519_secret() -> (String, PublicKey) {
     let static_secret = StaticSecret::random();
     let public_key: PublicKey = (&static_secret).into();
     let static_secret_bytes = static_secret.as_bytes();
-    let x25519_static_secret = X25519StaticSecret::from_bytes(static_secret_bytes);
+    let x25519_static_secret = KeychainStaticSecret::from_x25519_bytes(static_secret_bytes);
     (x25519_static_secret.to_str(), public_key)
+}
+
+pub fn generate_static_kyber1024_secret() -> (String, Kyber1024PublicKey) {
+    use pqcrypto_traits::kem::{PublicKey, SecretKey};
+    let (public_key, private_key) = kyber1024::keypair();
+    let static_secret_bytes = private_key.as_bytes();
+    let static_public_bytes = public_key.as_bytes();
+    let kyber1024_static_secret =
+        KeychainStaticSecret::from_kyber1024_bytes(static_secret_bytes, static_public_bytes);
+    (kyber1024_static_secret.to_str(), public_key)
 }

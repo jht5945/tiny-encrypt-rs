@@ -1,6 +1,7 @@
 use std::{env, fs};
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 
 use rust_util::{debugging, opt_result, simple_error, warning, XResult};
@@ -100,7 +101,7 @@ impl TinyEncryptConfig {
         Ok(config)
     }
 
-    pub fn resolve_path_namespace(&self, path: &PathBuf, append_te: bool) -> PathBuf {
+    pub fn resolve_path_namespace(&self, path: &Path, append_te: bool) -> PathBuf {
         if let Some(path_str) = path.to_str() {
             if path_str.starts_with(':') {
                 let namespace = path_str.chars().skip(1)
@@ -117,7 +118,7 @@ impl TinyEncryptConfig {
                 }
             }
         }
-        path.clone()
+        path.to_path_buf()
     }
 
     pub fn find_namespace(&self, prefix: &str) -> Option<&String> {
@@ -208,9 +209,9 @@ impl TinyEncryptConfig {
     }
 }
 
-pub fn resolve_path_namespace(config: &Option<TinyEncryptConfig>, path: &PathBuf, append_te: bool) -> PathBuf {
+pub fn resolve_path_namespace(config: &Option<TinyEncryptConfig>, path: &Path, append_te: bool) -> PathBuf {
     match config {
-        None => path.clone(),
+        None => path.to_path_buf(),
         Some(config) => config.resolve_path_namespace(path, append_te),
     }
 }

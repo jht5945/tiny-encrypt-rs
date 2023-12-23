@@ -1,4 +1,5 @@
 use clap::Args;
+use pqcrypto_traits::kem::PublicKey;
 use rust_util::{debugging, information, opt_result, simple_error, success, warning, XResult};
 
 use crate::config::TinyEncryptConfigEnvelop;
@@ -6,25 +7,33 @@ use crate::spec::TinyEncryptEnvelopType;
 #[cfg(feature = "secure-enclave")]
 use crate::util_keychainkey;
 use crate::util_keychainstatic;
-use crate::util_keychainstatic::{KeychainKey, X25519StaticSecret};
+use crate::util_keychainstatic::{KeychainKey, KeychainStaticSecret, KeychainStaticSecretAlgorithm};
 
 #[derive(Debug, Args)]
 pub struct CmdInitKeychain {
     /// Secure Enclave
     #[arg(long, short = 'S')]
     pub secure_enclave: bool,
+
     /// Expose secure enclave private key data
     #[arg(long, short = 'E')]
     pub expose_secure_enclave_private_key: bool,
+
     // /// Keychain name, or default
     // #[arg(long, short = 'c')]
     // pub keychain_name: Option<String>,
+
     /// Service name, or default: tiny-encrypt
     #[arg(long, short = 's')]
     pub server_name: Option<String>,
+
     /// Key name
     #[arg(long, short = 'n')]
     pub key_name: String,
+
+    /// Algorithm (x25519, or kyber1024, default x25519)
+    #[arg(long, short = 'a')]
+    pub algorithm: Option<String>,
 }
 
 const DEFAULT_SERVICE_NAME: &str = "tiny-encrypt";
@@ -79,31 +88,77 @@ pub fn keychain_key_static(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
     let key_name = &cmd_init_keychain.key_name;
     let keychain_key = KeychainKey::from_default_keychain(service_name, key_name);
 
-    let public_key = match keychain_key.get_password()? {
-        Some(static_x25519) => {
-            warning!("Key already exists: {}.{}", service_name, key_name);
-            let x25519_static_secret = X25519StaticSecret::parse_bytes(static_x25519.as_ref())?;
-            x25519_static_secret.to_public_key()?
-        }
-        None => {
-            let (keychain_key_bytes, public_key) = util_keychainstatic::generate_static_x25519_secret();
-            debugging!("Keychain key : {}", keychain_key_bytes);
-            opt_result!(
-                keychain_key.set_password(keychain_key_bytes.as_bytes()),
-                "Write static x25519 failed: {}"
-            );
-            public_key
+    let mut envelop_type = match &cmd_init_keychain.algorithm {
+        None => TinyEncryptEnvelopType::StaticX25519,
+        Some(algorithm) => {
+            let a_lower = algorithm.to_lowercase();
+            if &a_lower == "kyber" || &a_lower == "kyber1024" {
+                TinyEncryptEnvelopType::StaticKyber1024
+            } else if &a_lower == "25519" || &a_lower == "x25519" || &a_lower == "cv25519" || &a_lower == "curve25519" {
+                TinyEncryptEnvelopType::StaticX25519
+            } else {
+                return simple_error!("Unknown algorithm: {}", algorithm);
+            }
         }
     };
 
-    let public_key_hex = hex::encode(public_key.as_bytes());
+    let public_key_hex = match keychain_key.get_password()? {
+        Some(static_key) => {
+            warning!("Key already exists: {}.{}", service_name, key_name);
+            let keychain_static_secret = KeychainStaticSecret::parse_bytes(static_key.as_ref())?;
+            match keychain_static_secret.algo {
+                KeychainStaticSecretAlgorithm::X25519 => {
+                    envelop_type = TinyEncryptEnvelopType::StaticX25519;
+                }
+                KeychainStaticSecretAlgorithm::Kyber1024 => {
+                    envelop_type = TinyEncryptEnvelopType::StaticKyber1024;
+                }
+            }
+            match keychain_static_secret.algo {
+                KeychainStaticSecretAlgorithm::X25519 => {
+                    let public_key = keychain_static_secret.to_x25519_public_key()?;
+                    hex::encode(public_key.as_bytes())
+                }
+                KeychainStaticSecretAlgorithm::Kyber1024 => {
+                    let (_, public_key) = keychain_static_secret.to_kyber1204_static_secret()?;
+                    hex::encode(public_key.as_bytes())
+                }
+            }
+        }
+        None => {
+            let (keychain_key_bytes, public_key_hex) = match envelop_type {
+                TinyEncryptEnvelopType::StaticX25519 => {
+                    let (keychain_key_bytes, public_key) = util_keychainstatic::generate_static_x25519_secret();
+                    (keychain_key_bytes, hex::encode(public_key.as_bytes()))
+                }
+                TinyEncryptEnvelopType::StaticKyber1024 => {
+                    let (keychain_key_bytes, public_key) = util_keychainstatic::generate_static_kyber1024_secret();
+                    (keychain_key_bytes, hex::encode(public_key.as_bytes()))
+                }
+                _ => unreachable!(),
+            };
+            debugging!("Keychain key : {}", keychain_key_bytes);
+            opt_result!(
+                keychain_key.set_password(keychain_key_bytes.as_bytes()),
+                "Write static key failed: {}"
+            );
+            public_key_hex
+        }
+    };
+
     success!("Keychain name: {}", &key_name);
     success!("Public key   : {}", &public_key_hex);
 
+    let kid_part2 = if public_key_hex.len() <= 64 {
+        public_key_hex.clone()
+    } else {
+        public_key_hex.chars().take(64).collect()
+    };
+
     let config_envelop = TinyEncryptConfigEnvelop {
-        r#type: TinyEncryptEnvelopType::StaticX25519,
+        r#type: envelop_type,
         sid: Some(key_name.clone()),
-        kid: format!("keychain:{}", &public_key_hex),
+        kid: format!("keychain:{}", &kid_part2),
         desc: Some("Keychain static".to_string()),
         args: Some(vec![keychain_key.to_str()]),
         public_part: public_key_hex,

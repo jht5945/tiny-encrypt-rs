@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "1.5.3"
+version = "1.6.0"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -46,6 +46,8 @@ yubikey = { version = "0.8", features = ["untested"], optional = true }
 zeroize = "1.7"
 swift-rs = { path = "swift-rs", optional = true }
 spki = "0.7.3"
+pqcrypto-kyber = "0.8.0"
+pqcrypto-traits = "0.3.5"
 
 [build-dependencies]
 swift-rs = { path = "swift-rs", features = ["build"], optional = true }

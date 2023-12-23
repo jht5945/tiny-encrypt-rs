@@ -13,18 +13,14 @@ use rust_util::util_time::UnixEpochTime;
 use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
-use crate::consts::{
-    ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
-    ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519,
-    SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
-};
+use crate::consts::{ENC_AES256_GCM_KYBER1204, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, ENC_CHACHA20_POLY1305_KYBER1204, ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::crypto_rsa;
 use crate::spec::{
     EncEncryptedMeta, EncMetadata,
     TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta,
 };
-use crate::util_ecdh::{ecdh_p256, ecdh_p384, ecdh_x25519};
+use crate::util_ecdh::{ecdh_kyber1024, ecdh_p256, ecdh_p384, ecdh_x25519};
 use crate::util_progress::Progress;
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
@@ -279,6 +275,9 @@ fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfig
             TinyEncryptEnvelopType::PivP384 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh_p384(cryptor, key, envelop)?);
             }
+            TinyEncryptEnvelopType::StaticKyber1024 => {
+                encrypted_envelops.push(encrypt_envelop_ecdh_kyber1204(cryptor, key, envelop)?);
+            }
             _ => return simple_error!("Not supported type: {:?}", envelop.r#type),
         }
     }
@@ -311,6 +310,16 @@ fn encrypt_envelop_ecdh_x25519(cryptor: Cryptor, key: &[u8], envelop: &TinyEncry
     let enc_type = match cryptor {
         Cryptor::Aes256Gcm => ENC_AES256_GCM_X25519,
         Cryptor::ChaCha20Poly1305 => ENC_CHACHA20_POLY1305_X25519,
+    };
+    encrypt_envelop_shared_secret(cryptor, key, &shared_secret, &ephemeral_spki, enc_type, envelop)
+}
+
+fn encrypt_envelop_ecdh_kyber1204(cryptor: Cryptor, key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
+    let public_key_point_hex = &envelop.public_part;
+    let (shared_secret, ephemeral_spki) = ecdh_kyber1024::compute_kyber1024_shared_secret(public_key_point_hex)?;
+    let enc_type = match cryptor {
+        Cryptor::Aes256Gcm => ENC_AES256_GCM_KYBER1204,
+        Cryptor::ChaCha20Poly1305 => ENC_CHACHA20_POLY1305_KYBER1204,
     };
     encrypt_envelop_shared_secret(cryptor, key, &shared_secret, &ephemeral_spki, enc_type, envelop)
 }

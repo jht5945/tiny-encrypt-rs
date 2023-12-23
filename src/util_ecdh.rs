@@ -61,3 +61,18 @@ pub mod ecdh_x25519 {
         Ok((shared_secret.as_bytes().to_vec(), ephemeral_public.as_bytes().to_vec()))
     }
 }
+
+pub mod ecdh_kyber1024 {
+    use pqcrypto_kyber::kyber1024;
+    use pqcrypto_kyber::kyber1024::PublicKey as Kyber1024PublicKey;
+    use pqcrypto_traits::kem::{Ciphertext, PublicKey, SharedSecret};
+    use rust_util::{opt_result, XResult};
+
+    pub fn compute_kyber1024_shared_secret(public_key_point_hex: &str) -> XResult<(Vec<u8>, Vec<u8>)> {
+        let public_key_bytes = opt_result!(hex::decode(public_key_point_hex), "Parse Kyber1024 public key hex failed: {}");
+        let public_key = opt_result!(Kyber1024PublicKey::from_bytes(&public_key_bytes), "Parse Kyber1024 public key failed: {}");
+        let (shared_secret, ciphertext) = kyber1024::encapsulate(&public_key);
+
+        Ok((shared_secret.as_bytes().to_vec(), ciphertext.as_bytes().to_vec()))
+    }
+}
