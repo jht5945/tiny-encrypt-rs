@@ -17,12 +17,15 @@ pub struct CmdDirectDecrypt {
     /// File input
     #[arg(long, short = 'i')]
     pub file_in: PathBuf,
+
     /// File output
     #[arg(long, short = 'o')]
     pub file_out: PathBuf,
+
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
+
     /// Key in HEX (32 bytes)
     #[arg(long, short = 'k')]
     pub key: String,

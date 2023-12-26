@@ -20,7 +20,7 @@ use yubikey::piv::{AlgorithmId, decrypt_data};
 use yubikey::YubiKey;
 use zeroize::Zeroize;
 
-use crate::{cmd_encrypt, config, consts, crypto_simple, util, util_enc_file, util_env, util_envelop, util_file, util_pgp, util_piv};
+use crate::{cmd_encrypt, config, consts, crypto_simple, util, util_enc_file, util_env, util_envelop, util_file, util_gpg, util_pgp, util_piv};
 use crate::compress::GzStreamDecoder;
 use crate::config::TinyEncryptConfig;
 use crate::consts::{
@@ -38,47 +38,59 @@ use crate::util_digest::DigestWrite;
 use crate::util_keychainkey;
 #[cfg(feature = "macos")]
 use crate::util_keychainstatic;
+#[cfg(feature = "macos")]
 use crate::util_keychainstatic::KeychainKey;
 use crate::util_progress::Progress;
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
 pub struct CmdDecrypt {
-    /// Files need to be decrypted
-    pub paths: Vec<PathBuf>,
     /// PGP or PIV PIN
     #[arg(long, short = 'p')]
     pub pin: Option<String>,
+
     /// KeyID
     #[arg(long, short = 'k')]
     pub key_id: Option<String>,
+
     /// PIV slot
     #[arg(long, short = 's')]
     pub slot: Option<String>,
+
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
+
     /// Skip decrypt file
     #[arg(long, short = 'S')]
     pub skip_decrypt_file: bool,
+
     /// Direct print to the console, file must less than 10K
     #[arg(long, short = 'P')]
     pub direct_print: bool,
+
     /// Split std out and std err
     #[arg(long)]
     pub split_print: bool,
+
     /// Digest file
     #[arg(long, short = 'D')]
     pub digest_file: bool,
+
     /// Edit file
     #[arg(long, short = 'E')]
     pub edit_file: bool,
+
     /// Readonly mode
     #[arg(long)]
     pub readonly: bool,
+
     /// Digest algorithm (sha1, sha256[default], sha384, sha512 ...)
     #[arg(long, short = 'A')]
     pub digest_algorithm: Option<String>,
+
+    /// Files need to be decrypted
+    pub paths: Vec<PathBuf>,
 }
 
 impl Drop for CmdDecrypt {
@@ -446,6 +458,7 @@ pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
     match envelop.r#type {
         TinyEncryptEnvelopType::PgpRsa => try_decrypt_key_pgp_rsa(envelop, pin),
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
+        TinyEncryptEnvelopType::Gpg => try_decrypt_key_gpg(envelop),
         #[cfg(feature = "macos")]
         TinyEncryptEnvelopType::StaticX25519 => try_decrypt_key_ecdh_static_x25519(config, envelop),
         TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::PivP384 => try_decrypt_piv_key_ecdh(config, envelop, pin, slot),
@@ -596,6 +609,10 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
     util::zeroize(key);
     util::zeroize(shared_secret);
     Ok(decrypted_key)
+}
+
+fn try_decrypt_key_gpg(envelop: &TinyEncryptEnvelop) -> XResult<Vec<u8>> {
+    Ok(util_gpg::gpg_decrypt(&envelop.encrypted_key)?)
 }
 
 #[cfg(feature = "macos")]

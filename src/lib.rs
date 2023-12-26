@@ -39,12 +39,13 @@ mod util_progress;
 mod util_piv;
 #[cfg(feature = "smartcard")]
 mod util_pgp;
+mod util_gpg;
 mod util_ecdh;
 mod compress;
 mod config;
 mod spec;
 mod crypto_simple;
-mod crypto_rsa;
+mod util_rsa;
 mod crypto_cryptor;
 mod wrap_key;
 mod util_envelop;

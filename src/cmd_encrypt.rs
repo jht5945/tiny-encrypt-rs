@@ -10,54 +10,72 @@ use rsa::Pkcs1v15Encrypt;
 use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_size, XResult};
 use rust_util::util_time::UnixEpochTime;
 
-use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env};
+use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env, util_gpg};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
-use crate::consts::{ENC_AES256_GCM_KYBER1204, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, ENC_CHACHA20_POLY1305_KYBER1204, ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
+use crate::consts::{
+    ENC_AES256_GCM_KYBER1204,
+    ENC_AES256_GCM_P256, ENC_AES256_GCM_P384,
+    ENC_AES256_GCM_X25519,
+    ENC_CHACHA20_POLY1305_KYBER1204,
+    ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384,
+    ENC_CHACHA20_POLY1305_X25519,
+    SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
+};
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
-use crate::crypto_rsa;
 use crate::spec::{
     EncEncryptedMeta, EncMetadata,
     TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta,
 };
 use crate::util_ecdh::{ecdh_kyber1024, ecdh_p256, ecdh_p384, ecdh_x25519};
 use crate::util_progress::Progress;
+use crate::util_rsa;
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
 
 #[derive(Debug, Args)]
 pub struct CmdEncrypt {
-    /// Files need to be decrypted
-    pub paths: Vec<PathBuf>,
     /// Plaintext comment
     #[arg(long, short = 'c')]
     pub comment: Option<String>,
+
     /// Encrypted comment
     #[arg(long, short = 'C')]
     pub encrypted_comment: Option<String>,
+
     /// Encryption profile (use default when --key-filter is assigned)
     #[arg(long, short = 'p')]
     pub profile: Option<String>,
+
     /// Encryption key filter (key_id or type:TYPE(e.g. ecdh, pgp, ecdh-p384, pgp-ed25519), multiple joined by ',', ALL for all)
     #[arg(long, short = 'k')]
     pub key_filter: Option<String>,
+
     /// Compress before encrypt
     #[arg(long, short = 'x')]
     pub compress: bool,
+
     /// Compress level (from 0[none], 1[fast] .. 6[default] .. to 9[best])
     #[arg(long, short = 'L')]
     pub compress_level: Option<u32>,
+
     /// Remove source file
     #[arg(long, short = 'R')]
     pub remove_file: bool,
+
     /// Create file (create a empty encrypted file)
     #[arg(long, short = 'a')]
     pub create: bool,
+
     /// Disable compress meta
     #[arg(long)]
     pub disable_compress_meta: bool,
+
     /// Encryption algorithm (AES/GCM, CHACHA20/POLY1305 or AES, CHACHA20, default AES/GCM)
     #[arg(long, short = 'A')]
     pub encryption_algorithm: Option<String>,
+
+    /// Files need to be decrypted
+    pub paths: Vec<PathBuf>,
 }
 
 pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
@@ -266,6 +284,9 @@ fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfig
             TinyEncryptEnvelopType::PgpRsa | TinyEncryptEnvelopType::PivRsa => {
                 encrypted_envelops.push(encrypt_envelop_rsa(key, envelop)?);
             }
+            TinyEncryptEnvelopType::Gpg => {
+                encrypted_envelops.push(encrypt_envelop_gpg(key, envelop)?);
+            }
             TinyEncryptEnvelopType::PgpX25519 | TinyEncryptEnvelopType::StaticX25519 => {
                 encrypted_envelops.push(encrypt_envelop_ecdh_x25519(cryptor, key, envelop)?);
             }
@@ -353,7 +374,7 @@ fn encrypt_envelop_shared_secret(cryptor: Cryptor,
 }
 
 fn encrypt_envelop_rsa(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
-    let rsa_public_key = opt_result!(crypto_rsa::parse_spki(&envelop.public_part), "Parse RSA public key failed: {}");
+    let rsa_public_key = opt_result!(util_rsa::parse_spki(&envelop.public_part), "Parse RSA public key failed: {}");
     let mut rng = rand::thread_rng();
     let encrypted_key = opt_result!(rsa_public_key.encrypt(&mut rng, Pkcs1v15Encrypt, key), "RSA public key encrypt failed: {}");
     Ok(TinyEncryptEnvelop {
@@ -361,6 +382,16 @@ fn encrypt_envelop_rsa(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResul
         kid: envelop.kid.clone(),
         desc: None,
         encrypted_key: util::encode_base64(&encrypted_key),
+    })
+}
+
+fn encrypt_envelop_gpg(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResult<TinyEncryptEnvelop> {
+    let encrypted_key = opt_result!(util_gpg::gpg_encrypt(&envelop.public_part, key), "GPG encrypt failed: {}");
+    Ok(TinyEncryptEnvelop {
+        r#type: envelop.r#type,
+        kid: envelop.kid.clone(),
+        desc: None,
+        encrypted_key,
     })
 }
 

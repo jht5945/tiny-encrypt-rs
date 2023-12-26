@@ -72,7 +72,7 @@ fn config_key_filter(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XRe
     let mut config_envelops = vec![];
     for envelop in envelops {
         config_envelops.push(ConfigEnvelop {
-            r#type: envelop.r#type.get_name().to_string(),
+            r#type: format!("{}{}", envelop.r#type.get_name(), iff!(envelop.r#type.is_hardware_security(), " *", "")),
             sid: strip_field(&envelop.sid.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()), 25),
             kid: strip_field(&envelop.kid, 40),
             desc: strip_field(&envelop.desc.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()), 40),
@@ -82,6 +82,7 @@ fn config_key_filter(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XRe
     let mut table = Table::new(config_envelops);
     table.with(Style::sharp());
     println!("{}", table);
+    println!("> Type with * is hardware security");
     Ok(())
 }
 

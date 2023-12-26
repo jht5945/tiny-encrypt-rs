@@ -18,11 +18,12 @@ use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
 pub struct CmdInfo {
-    /// File
-    pub paths: Vec<PathBuf>,
     /// Show raw meta
     #[arg(long, short = 'M', default_value_t = false)]
     pub raw_meta: bool,
+
+    /// File
+    pub paths: Vec<PathBuf>,
 }
 
 pub fn info(cmd_info: CmdInfo) -> XResult<()> {

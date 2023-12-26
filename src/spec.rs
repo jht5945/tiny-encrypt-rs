@@ -20,6 +20,7 @@ pub struct TinyEncryptMeta {
     pub version: String,
     pub created: u64,
     pub user_agent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub latest_user_agent: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
@@ -73,6 +74,9 @@ pub enum TinyEncryptEnvelopType {
     // OpenPGP Card X25519
     #[serde(rename = "pgp-x25519")]
     PgpX25519,
+    // GPG Command Line
+    #[serde(rename = "gpg")]
+    Gpg,
     // Keychain Static X25519 (less secure)
     #[serde(rename = "static-x25519")]
     StaticX25519,
@@ -82,9 +86,6 @@ pub enum TinyEncryptEnvelopType {
     // Secure Enclave ECDH P256
     #[serde(rename = "key-p256")]
     KeyP256,
-    // Age, tiny-encrypt-rs is not supported
-    #[serde(rename = "age")]
-    Age,
     // PIV ECDH P256
     #[serde(rename = "piv-p256", alias = "ecdh")]
     PivP256,
@@ -94,6 +95,9 @@ pub enum TinyEncryptEnvelopType {
     // PIV RSA
     #[serde(rename = "piv-rsa")]
     PivRsa,
+    // Age, tiny-encrypt-rs is not supported
+    #[serde(rename = "age")]
+    Age,
     // KMS, tiny-encrypt-rs is not supported
     #[serde(rename = "kms")]
     Kms,
@@ -108,29 +112,47 @@ impl TinyEncryptEnvelopType {
         match self {
             TinyEncryptEnvelopType::PgpRsa => "pgp-rsa",
             TinyEncryptEnvelopType::PgpX25519 => "pgp-x25519",
+            TinyEncryptEnvelopType::Gpg => "gpg",
             TinyEncryptEnvelopType::StaticX25519 => "static-x25519",
             TinyEncryptEnvelopType::StaticKyber1024 => "static-kyber1024",
             TinyEncryptEnvelopType::KeyP256 => "key-p256",
-            TinyEncryptEnvelopType::Age => "age",
             TinyEncryptEnvelopType::PivP256 => "piv-p256",
             TinyEncryptEnvelopType::PivP384 => "piv-p384",
             TinyEncryptEnvelopType::PivRsa => "piv-rsa",
+            TinyEncryptEnvelopType::Age => "age",
             TinyEncryptEnvelopType::Kms => "kms",
         }
     }
 
     pub fn auto_select(&self) -> bool {
         match self {
-            TinyEncryptEnvelopType::PgpRsa => false,
-            TinyEncryptEnvelopType::PgpX25519 => false,
-            TinyEncryptEnvelopType::StaticX25519 => true,
-            TinyEncryptEnvelopType::StaticKyber1024 => true,
-            TinyEncryptEnvelopType::KeyP256 => true,
-            TinyEncryptEnvelopType::Age => false,
-            TinyEncryptEnvelopType::PivP256 => false,
-            TinyEncryptEnvelopType::PivP384 => false,
-            TinyEncryptEnvelopType::PivRsa => false,
-            TinyEncryptEnvelopType::Kms => true,
+            TinyEncryptEnvelopType::StaticX25519
+            | TinyEncryptEnvelopType::StaticKyber1024
+            | TinyEncryptEnvelopType::KeyP256
+            | TinyEncryptEnvelopType::Gpg
+            | TinyEncryptEnvelopType::Kms => true,
+            TinyEncryptEnvelopType::PgpRsa
+            | TinyEncryptEnvelopType::PgpX25519
+            | TinyEncryptEnvelopType::PivP256
+            | TinyEncryptEnvelopType::PivP384
+            | TinyEncryptEnvelopType::PivRsa
+            | TinyEncryptEnvelopType::Age => false,
+        }
+    }
+
+    pub fn is_hardware_security(&self) -> bool {
+        match self {
+            TinyEncryptEnvelopType::PgpRsa
+            | TinyEncryptEnvelopType::PgpX25519
+            | TinyEncryptEnvelopType::KeyP256
+            | TinyEncryptEnvelopType::PivP256
+            | TinyEncryptEnvelopType::PivP384
+            | TinyEncryptEnvelopType::PivRsa
+            | TinyEncryptEnvelopType::Age => true,
+            TinyEncryptEnvelopType::StaticX25519
+            | TinyEncryptEnvelopType::StaticKyber1024
+            | TinyEncryptEnvelopType::Gpg // GPG is unknown(hardware/software)
+            | TinyEncryptEnvelopType::Kms => false,
         }
     }
 }

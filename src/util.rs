@@ -176,10 +176,7 @@ pub fn read_number(hint: &str, from: usize, to: usize) -> usize {
 }
 
 pub fn get_user_agent() -> String {
-    format!("TinyEncrypt-rs v{}@{}-{}",
-            env!("CARGO_PKG_VERSION"),
-            get_os(), get_arch(),
-    )
+    format!("TinyEncrypt-rs v{}@{}-{}", env!("CARGO_PKG_VERSION"), get_os(), get_arch())
 }
 
 pub fn get_os() -> String {

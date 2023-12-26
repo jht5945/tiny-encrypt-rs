@@ -42,11 +42,13 @@ impl WrapKey {
         buf.push_str(WRAP_KEY_PREFIX);
         let header = serde_json::to_string(&self.header)?;
         let header_str = util::encode_base64_url_no_pad(header.as_bytes());
+        let nonce_str = util::encode_base64_url_no_pad(&self.nonce);
+        let encrypted_data_str = util::encode_base64_url_no_pad(&self.encrypted_data);
         buf.push_str(&header_str);
         buf.push('.');
-        buf.push_str(&util::encode_base64_url_no_pad(&self.nonce));
+        buf.push_str(&nonce_str);
         buf.push('.');
-        buf.push_str(&util::encode_base64_url_no_pad(&self.encrypted_data));
+        buf.push_str(&encrypted_data_str);
         Ok(buf)
     }
 

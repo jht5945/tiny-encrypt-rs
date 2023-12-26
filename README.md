@@ -78,17 +78,44 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
 }
 ```
 
+<br>
+
+Kyber1024 usage:
+Generate `static-kyber1024` keypair:
+```shell
+$ tiny-encrypt -K -a kyber1024 -n keyname
+[OK   ] Keychain name: keyname
+[OK   ] Public key   : a731b5032194c3d2ad01f36d64e859ca9738595c21aa19c852dac22f4...
+[INFO ] Config envelop:
+{
+  "type": "static-kyber1024",
+  "sid": "keyname",
+  "kid": "keychain:a731b5032194c3d2ad01f36d64e859ca9738595c21aa19c852dac22f411036c7",
+  "desc": "Keychain static",
+  "args": [
+    "keychain::tiny-encrypt:keyname"
+  ],
+  "publicPart": "a731b5032194c3d2ad01f36d64e859ca9738595c21aa19c852dac22f411036c..."
+}
+```
+
+Then write file `~/.tinyencrypt/config-rs.json`.
+
+Last, config key id to profile.
+
+
 Supported PKI encryption types:
 
-| Type          | Algorithm       | Description                             |
-|---------------|-----------------|-----------------------------------------|
-| pgp-rsa       | PKCS1-v1.5      | OpenPGP Encryption Key (Previous `pgp`) |
-| pgp-x25519    | ECDH(X25519)    | OpenPGP Encryption Key                  |
-| static-x25519 | ECDH(X25519)    | Key Stored in macOS Keychain Access     |
-| piv-p256      | ECDH(secp256r1) | PIV Slot (Previous `ecdh`)              |
-| piv-p384      | ECDH(secp384r1) | PIV Slot (Previous `ecdh-p384`)         |
-| key-p256      | ECDH(secp256r1) | Key Stored in macOS Secure Enclave      |
-| piv-rsa       | PKCS1-v1.5      | PIV Slot                                |
+| Type             | Algorithm       | Description                             |
+|------------------|-----------------|-----------------------------------------|
+| pgp-rsa          | PKCS1-v1.5      | OpenPGP Encryption Key (Previous `pgp`) |
+| pgp-x25519       | ECDH(X25519)    | OpenPGP Encryption Key                  |
+| static-x25519    | ECDH(X25519)    | Key Stored in macOS Keychain Access     |
+| static-kyber1024 | Kyber1024       | Key Stored in macOS Keychain Access     |
+| piv-p256         | ECDH(secp256r1) | PIV Slot (Previous `ecdh`)              |
+| piv-p384         | ECDH(secp384r1) | PIV Slot (Previous `ecdh-p384`)         |
+| key-p256         | ECDH(secp256r1) | Key Stored in macOS Secure Enclave      |
+| piv-rsa          | PKCS1-v1.5      | PIV Slot                                |
 
 Smart Card(Yubikey) protected ECDH Encryption description as below:
 

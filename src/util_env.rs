@@ -11,6 +11,7 @@ pub const TINY_ENCRYPT_ENV_NO_PROGRESS: &str = "TINY_ENCRYPT_NO_PROGRESS";
 pub const TINY_ENCRYPT_ENV_PIN: &str = "TINY_ENCRYPT_PIN";
 pub const TINY_ENCRYPT_ENV_KEY_ID: &str = "TINY_ENCRYPT_KEY_ID";
 pub const TINY_ENCRYPT_ENV_AUTO_SELECT_KEY_IDS: &str = "TINY_ENCRYPT_AUTO_SELECT_KEY_IDS";
+pub const TINY_ENCRYPT_ENV_GPG_COMMAND: &str = "TINY_ENCRYPT_GPG_COMMAND";
 
 pub fn get_default_encryption_algorithm() -> Option<&'static str> {
     let env_default_algorithm = env::var(TINY_ENCRYPT_ENV_DEFAULT_ALGORITHM).ok();
@@ -32,6 +33,10 @@ pub fn get_pin() -> Option<String> {
 
 pub fn get_key_id() -> Option<String> {
     env::var(TINY_ENCRYPT_ENV_KEY_ID).ok()
+}
+
+pub fn get_gpg_cmd() -> Option<String> {
+    env::var(TINY_ENCRYPT_ENV_GPG_COMMAND).ok()
 }
 
 pub fn get_auto_select_key_ids() -> Option<Vec<String>> {

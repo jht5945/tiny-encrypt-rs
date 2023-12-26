@@ -173,7 +173,11 @@ impl TinyEncryptConfig {
         let mut key_ids = vec![];
         if key_filter.is_none() || profile.is_some() {
             let profile = profile.as_ref().map(String::as_str).unwrap_or("default");
-            if let Some(kids) = self.profiles.get(profile) {
+            if profile == "ALL" {
+                self.envelops.iter().for_each(|e| {
+                    key_ids.push(e.kid.to_string());
+                });
+            } else if let Some(kids) = self.profiles.get(profile) {
                 kids.iter().for_each(|k| key_ids.push(k.to_string()));
             }
         }

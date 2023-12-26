@@ -21,14 +21,18 @@ pub struct CmdExecEnv {
     /// PGP or PIV PIN
     #[arg(long, short = 'p')]
     pub pin: Option<String>,
+
     /// KeyID
     #[arg(long, short = 'k')]
     pub key_id: Option<String>,
+
     /// PIV slot
     #[arg(long, short = 's')]
     pub slot: Option<String>,
+
     /// Tiny encrypt file name
     pub file_name: String,
+
     /// Command and arguments
     pub command_arguments: Vec<String>,
 }
