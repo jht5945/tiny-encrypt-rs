@@ -1,9 +1,11 @@
+use std::path::PathBuf;
+
 use pqcrypto_kyber::kyber1024;
 use pqcrypto_kyber::kyber1024::Ciphertext as Kyber1024Ciphertext;
 use pqcrypto_kyber::kyber1024::PublicKey as Kyber1024PublicKey;
 use pqcrypto_kyber::kyber1024::SecretKey as Kyber1024SecretKey;
-use rust_util::{debugging, opt_result, opt_value_result, simple_error, XResult};
-use security_framework::os::macos::keychain::SecKeychain;
+use rust_util::{debugging, opt_result, opt_value_result, simple_error, util_file, XResult};
+use security_framework::os::macos::keychain::{CreateOptions, SecKeychain};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::Zeroize;
 
@@ -138,11 +140,8 @@ impl KeychainStaticSecret {
 }
 
 impl KeychainKey {
-    pub fn from_default_keychain(service_name: &str, key_name: &str) -> Self {
-        Self::from("", service_name, key_name)
-    }
-
     pub fn from(keychain_name: &str, service_name: &str, key_name: &str) -> Self {
+        debugging!("Keychain key: {} - {} - {}", keychain_name, service_name, key_name);
         Self {
             keychain_name: keychain_name.to_string(),
             service_name: service_name.to_string(),
@@ -179,6 +178,7 @@ impl KeychainKey {
 
     pub fn get_password(&self) -> XResult<Option<Vec<u8>>> {
         let sec_keychain = self.get_keychain()?;
+        debugging!("Try find generic password: {}.{}", &self.service_name, &self.key_name);
         match sec_keychain.find_generic_password(&self.service_name, &self.key_name) {
             Ok((item_password, _keychain_item)) => {
                 Ok(Some(item_password.as_ref().to_vec()))
@@ -204,9 +204,23 @@ impl KeychainKey {
 
     fn get_keychain(&self) -> XResult<SecKeychain> {
         if !self.keychain_name.is_empty() {
-            return simple_error!("Keychain name must be empty.");
+            let keychain_file_name = format!("{}.keychain", &self.keychain_name);
+            debugging!("Open or create keychain: {}", &keychain_file_name);
+            let keychain_exists = check_keychain_exists(&keychain_file_name);
+            if keychain_exists {
+                Ok(opt_result!(SecKeychain::open(&keychain_file_name), "Open keychain: {}, failed: {}", &keychain_file_name))
+            } else {
+                match CreateOptions::new().prompt_user(true).create(&keychain_file_name) {
+                    Ok(sec_keychain) => Ok(sec_keychain),
+                    Err(ce) => match SecKeychain::open(&keychain_file_name) {
+                        Ok(sec_keychain) => Ok(sec_keychain),
+                        Err(oe) => simple_error!("Create keychain: {}, failed: {}, open also failed: {}", &self.keychain_name, ce, oe)
+                    }
+                }
+            }
+        } else {
+            Ok(opt_result!(SecKeychain::default(), "Get keychain failed: {}"))
         }
-        Ok(opt_result!(SecKeychain::default(), "Get keychain failed: {}"))
     }
 }
 
@@ -252,4 +266,29 @@ pub fn generate_static_kyber1024_secret() -> (String, Kyber1024PublicKey) {
     let kyber1024_static_secret =
         KeychainStaticSecret::from_kyber1024_bytes(static_secret_bytes, static_public_bytes);
     (kyber1024_static_secret.to_str(), public_key)
+}
+
+fn check_keychain_exists(keychain_file_name: &str) -> bool {
+    let keychain_path = PathBuf::from(util_file::resolve_file_path("~/Library/Keychains/"));
+    match keychain_path.read_dir() {
+        Ok(read_dir) => {
+            for dir in read_dir {
+                match dir {
+                    Ok(dir) => if let Some(file_name) = dir.file_name().to_str() {
+                        if file_name.starts_with(keychain_file_name) {
+                            debugging!("Found key chain file: {:?}", dir);
+                            return true;
+                        }
+                    }
+                    Err(e) => {
+                        debugging!("Read path sub dir: {:?} failed: {}", keychain_path, e);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            debugging!("Read path: {:?} failed: {}", keychain_path, e);
+        }
+    }
+    false
 }

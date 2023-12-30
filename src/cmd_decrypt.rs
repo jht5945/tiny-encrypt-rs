@@ -612,7 +612,7 @@ fn try_decrypt_key_ecdh_pgp_x25519(envelop: &TinyEncryptEnvelop, pin: &Option<St
 }
 
 fn try_decrypt_key_gpg(envelop: &TinyEncryptEnvelop) -> XResult<Vec<u8>> {
-    Ok(util_gpg::gpg_decrypt(&envelop.encrypted_key)?)
+    util_gpg::gpg_decrypt(&envelop.encrypted_key)
 }
 
 #[cfg(feature = "macos")]

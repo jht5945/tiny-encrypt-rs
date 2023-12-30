@@ -37,6 +37,7 @@ gpg: public key decryption failed: Operation cancelled
 gpg: decryption failed: No secret key
  */
 
+use std::io::Write;
 use std::process::{Command, Stdio};
 
 use rust_util::{opt_result, opt_value_result, simple_error, XResult};
@@ -45,21 +46,24 @@ use crate::util_env;
 
 pub fn gpg_encrypt(key_id: &str, message: &[u8]) -> XResult<String> {
     let message_hex = hex::encode(message);
-    let echo = opt_result!(Command::new("echo").arg(&message_hex)
-        .stdout(Stdio::piped())
-        .spawn(), "echo message failed: {}");
-    let echo_stdout = opt_value_result!(echo.stdout, "Get echo stdout failed: none");
 
-    let mut cmd = Command::new(&get_gpg_cmd());
-    let encrypt_result = cmd
+    let mut cmd = Command::new(get_gpg_cmd());
+    let gpg_encrypt_result = cmd
         .args([
             "-e", "-a", "--no-comment",
             "-r", &key_id,
             "--comment", &format!("tiny-encrypt-v{} - {}", env!("CARGO_PKG_VERSION"), &key_id)
         ])
-        .stdin(Stdio::from(echo_stdout))
-        .output();
-    let encrypt_output = opt_result!(encrypt_result, "Encrypt GPG failed: {}");
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let gpg_encrypt = opt_result!(gpg_encrypt_result, "Run GPG encrypt failed: {}");
+    let mut gpg_encrypt_stdin = opt_value_result!(gpg_encrypt.stdin.as_ref(), "Get GPG encrypt stdin failed.");
+    opt_result!(gpg_encrypt_stdin.write_all(message_hex.as_bytes()), "Write GPG encrypt stdin failed: {}");
+    let encrypt_result = gpg_encrypt.wait_with_output();
+
+    let encrypt_output = opt_result!(encrypt_result, "GPG encrypt failed: {}");
     let stdout = String::from_utf8_lossy(&encrypt_output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&encrypt_output.stderr).to_string();
     if !encrypt_output.status.success() {
@@ -72,17 +76,20 @@ pub fn gpg_encrypt(key_id: &str, message: &[u8]) -> XResult<String> {
 }
 
 pub fn gpg_decrypt(message: &str) -> XResult<Vec<u8>> {
-    let echo = opt_result!(Command::new("echo").arg(&message)
-        .stdout(Stdio::piped())
-        .spawn(), "echo message failed: {}");
-    let echo_stdout = opt_value_result!(echo.stdout, "Get echo stdout failed: none");
-
-    let mut cmd = Command::new(&get_gpg_cmd());
-    let encrypt_result = cmd
+    let mut cmd = Command::new(get_gpg_cmd());
+    let gpg_decrypt_result = cmd
         .arg("-d")
-        .stdin(Stdio::from(echo_stdout))
-        .output();
-    let decrypt_output = opt_result!(encrypt_result, "Decrypt GPG failed: {}");
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+
+    let gpg_encrypt = opt_result!(gpg_decrypt_result, "Run GPG decrypt failed: {}");
+    let mut gpg_encrypt_stdin = opt_value_result!(gpg_encrypt.stdin.as_ref(), "Get GPG decrypt stdin failed.");
+    opt_result!(gpg_encrypt_stdin.write_all(message.as_bytes()), "Write GPG decrypt stdin failed: {}");
+    let decrypt_result = gpg_encrypt.wait_with_output();
+
+    let decrypt_output = opt_result!(decrypt_result, "GPG decrypt failed: {}");
     let stdout = String::from_utf8_lossy(&decrypt_output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&decrypt_output.stderr).to_string();
     if !decrypt_output.status.success() {
@@ -91,7 +98,7 @@ pub fn gpg_decrypt(message: &str) -> XResult<Vec<u8>> {
             decrypt_output.status.code(), stdout, stderr
         );
     }
-    let decrypted = opt_result!(hex::decode(&stdout.trim()), "Decode decrypted message failed: {}");
+    let decrypted = opt_result!(hex::decode(stdout.trim()), "Decode decrypted message failed: {}");
     Ok(decrypted)
 }
 

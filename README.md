@@ -1,7 +1,6 @@
 # tiny-encrypt-rs
 
-**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or MacBook is
-required, the key MUST support PIV or OpenPGP.
+**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or MacBook with Secure Enclave get the best security effect, the key MUST support PIV or OpenPGP.
 
 ![](https://cdn.hatter.ink/doc/7684_4DB4452911E2A25AB993429AA7FFCD65/yubikey-5-family.png)
 
@@ -82,6 +81,7 @@ Encrypt config `~/.tinyencrypt/config-rs.json`:
 
 Kyber1024 usage:
 Generate `static-kyber1024` keypair:
+
 ```shell
 $ tiny-encrypt -K -a kyber1024 -n keyname
 [OK   ] Keychain name: keyname
@@ -103,13 +103,13 @@ Then write file `~/.tinyencrypt/config-rs.json`.
 
 Last, config key id to profile.
 
-
 Supported PKI encryption types:
 
 | Type             | Algorithm       | Description                             |
 |------------------|-----------------|-----------------------------------------|
 | pgp-rsa          | PKCS1-v1.5      | OpenPGP Encryption Key (Previous `pgp`) |
 | pgp-x25519       | ECDH(X25519)    | OpenPGP Encryption Key                  |
+| gpg              | OpenPGP         | GnuPG Command                           |
 | static-x25519    | ECDH(X25519)    | Key Stored in macOS Keychain Access     |
 | static-kyber1024 | Kyber1024       | Key Stored in macOS Keychain Access     |
 | piv-p256         | ECDH(secp256r1) | PIV Slot (Previous `ecdh`)              |

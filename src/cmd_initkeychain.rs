@@ -19,9 +19,9 @@ pub struct CmdInitKeychain {
     #[arg(long, short = 'E')]
     pub expose_secure_enclave_private_key: bool,
 
-    // /// Keychain name, or default
-    // #[arg(long, short = 'c')]
-    // pub keychain_name: Option<String>,
+    /// Keychain name, or default [--keychain-name not works yet]
+    #[arg(long, short = 'c')]
+    pub keychain_name: Option<String>,
 
     /// Service name, or default: tiny-encrypt
     #[arg(long, short = 's')]
@@ -55,6 +55,7 @@ pub fn keychain_key_se(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
         return simple_error!("Secure enclave is not supported.");
     }
 
+    let keychain_name = cmd_init_keychain.keychain_name.as_deref().unwrap_or("");
     let service_name = cmd_init_keychain.server_name.as_deref().unwrap_or(DEFAULT_SERVICE_NAME);
     let key_name = &cmd_init_keychain.key_name;
 
@@ -64,7 +65,7 @@ pub fn keychain_key_se(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
     let saved_arg0 = if cmd_init_keychain.expose_secure_enclave_private_key {
         private_key_base64
     } else {
-        let keychain_key = KeychainKey::from_default_keychain(service_name, key_name);
+        let keychain_key = KeychainKey::from(keychain_name, service_name, key_name);
         keychain_key.set_password(private_key_base64.as_bytes())?;
         keychain_key.to_str()
     };
@@ -84,9 +85,10 @@ pub fn keychain_key_se(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
 }
 
 pub fn keychain_key_static(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
+    let keychain_name = cmd_init_keychain.keychain_name.as_deref().unwrap_or("");
     let service_name = cmd_init_keychain.server_name.as_deref().unwrap_or(DEFAULT_SERVICE_NAME);
     let key_name = &cmd_init_keychain.key_name;
-    let keychain_key = KeychainKey::from_default_keychain(service_name, key_name);
+    let keychain_key = KeychainKey::from(keychain_name, service_name, key_name);
 
     let mut envelop_type = match &cmd_init_keychain.algorithm {
         None => TinyEncryptEnvelopType::StaticX25519,
