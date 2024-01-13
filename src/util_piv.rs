@@ -1,18 +1,22 @@
 use std::io;
 use std::io::Write;
 
-use rust_util::{information, print_ex, simple_error, XResult};
+use rust_util::{debugging, information, print_ex, simple_error, XResult};
 use yubikey::piv::{RetiredSlotId, SlotId};
 
 use crate::config::TinyEncryptConfig;
 
-pub fn read_piv_slot(config: &Option<TinyEncryptConfig>, kid: &str, slot: &Option<String>) -> XResult<String> {
+pub fn read_piv_slot(config: &Option<TinyEncryptConfig>, kid: &str, slot: &Option<String>, silent: bool) -> XResult<String> {
     match slot {
         Some(slot) => Ok(slot.to_string()),
         None => {
             if let Some(config) = config {
                 if let Some(first_arg) = config.find_first_arg_by_kid(kid) {
-                    information!("Found kid: {}'s slot: {}", kid, first_arg);
+                    if silent {
+                        debugging!("Found kid: {}'s slot: {}", kid, first_arg);
+                    } else {
+                        information!("Found kid: {}'s slot: {}", kid, first_arg);
+                    }
                     return Ok(first_arg.to_string());
                 }
             }

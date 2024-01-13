@@ -4,7 +4,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use clap::Args;
-use rust_util::{debugging, iff, information, opt_result, simple_error, util_cmd, util_msg, warning, XResult};
+use rust_util::{debugging, iff, opt_result, simple_error, util_cmd, util_msg, warning, XResult};
 use serde_json::Value;
 use zeroize::Zeroize;
 
@@ -71,9 +71,9 @@ pub fn exec_env(cmd_exec_env: CmdExecEnv) -> XResult<()> {
         .unwrap_or(consts::TINY_ENC_AES_GCM);
     let cryptor = Cryptor::from(encryption_algorithm)?;
 
-    let selected_envelop = select_envelop(&meta, &key_id, &config)?;
+    let selected_envelop = select_envelop(&meta, &key_id, &config, true)?;
 
-    let key = SecVec(try_decrypt_key(&config, selected_envelop, &pin, &cmd_exec_env.slot)?);
+    let key = SecVec(try_decrypt_key(&config, selected_envelop, &pin, &cmd_exec_env.slot, true)?);
     let nonce = SecVec(opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}"));
     let key_nonce = KeyNonce { k: key.as_ref(), n: nonce.as_ref() };
 
@@ -95,7 +95,7 @@ pub fn exec_env(cmd_exec_env: CmdExecEnv) -> XResult<()> {
         -1
     };
 
-    information!("Finished, cost: {}ms", start.elapsed().as_millis());
+    debugging!("Finished, cost: {}ms", start.elapsed().as_millis());
     std::process::exit(exit_code);
 }
 

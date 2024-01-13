@@ -5,7 +5,7 @@ use rust_util::{failure, opt_result, opt_value_result, simple_error, success, wa
 use crate::util;
 
 pub fn read_and_verify_openpgp_pin(trans: &mut OpenPgpTransaction, pin: &Option<String>) -> XResult<()> {
-    let pin = util::read_pin(pin);
+    let pin = util::read_pin(pin)?;
     if let Err(e) = trans.verify_pw1_user(pin.as_ref()) {
         failure!("Verify user pin failed: {}", e);
         return simple_error!("User pin verify failed: {}", e);

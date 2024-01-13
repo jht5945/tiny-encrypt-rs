@@ -1,15 +1,22 @@
 use std::{fs, io};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine;
 use base64::engine::general_purpose;
+use dialoguer::Confirm;
+use dialoguer::console::Term;
+use dialoguer::theme::ColorfulTheme;
+use pinentry::PassphraseInput;
 use rand::random;
 use rust_util::{information, opt_result, print_ex, simple_error, util_term, warning, XResult};
+use secrecy::ExposeSecret;
 use zeroize::Zeroize;
 
 use crate::consts::TINY_ENC_FILE_EXT;
 use crate::util_digest::DigestWrite;
+use crate::util_env;
 
 pub struct SecVec(pub Vec<u8>);
 
@@ -25,14 +32,45 @@ impl AsRef<[u8]> for SecVec {
     }
 }
 
-pub fn read_pin(pin: &Option<String>) -> String {
-    match pin {
+pub fn read_pin(pin: &Option<String>) -> XResult<String> {
+    let rpin = match pin {
         Some(pin) => pin.to_string(),
-        None => if util_term::read_yes_no("Use default PIN 123456, please confirm") {
+        None => if is_use_default_pin() {
             "123456".into()
         } else {
-            rpassword::prompt_password("Please input PIN: ").expect("Read PIN failed")
+            let pin_entry = util_env::get_pin_entry().unwrap_or_else(|| "pinentry".to_string());
+            if let Some(mut input) = PassphraseInput::with_binary(pin_entry) {
+                let secret = input
+                    .with_description("Please input your PIN.")
+                    .with_prompt("PIN:")
+                    .interact();
+                opt_result!(secret, "Read PIN from pinentry failed: {}")
+                    .expose_secret()
+                    .to_string()
+            } else {
+                opt_result!(rpassword::prompt_password("Please input PIN: "), "Read PIN failed: {}")
+            }
         }
+    };
+    Ok(rpin)
+}
+
+pub fn is_use_default_pin() -> bool {
+    if util_env::get_no_default_pin_hint() {
+        return false;
+    }
+    let use_dialoguer = util_env::get_use_dialoguer();
+    if use_dialoguer {
+        register_ctrlc();
+        let confirm_result = Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt("Use default PIN?")
+            .interact();
+        if confirm_result.is_err() {
+            let _ = Term::stderr().show_cursor();
+        }
+        confirm_result.unwrap_or(false)
+    } else {
+        util_term::read_yes_no("Use default PIN 123456, please confirm")
     }
 }
 
@@ -247,6 +285,17 @@ pub fn ratio(numerator: u64, denominator: u64) -> String {
     }
     let r = (numerator * 10000) / denominator;
     format!("{:.2}", r as f64 / 100f64)
+}
+
+const CTRL_C_SET: AtomicBool = AtomicBool::new(false);
+
+pub fn register_ctrlc() {
+    if !CTRL_C_SET.load(Ordering::SeqCst) {
+        CTRL_C_SET.store(true, Ordering::SeqCst);
+        let _ = ctrlc::set_handler(move || {
+            // DO NOTHING
+        });
+    }
 }
 
 #[test]

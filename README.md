@@ -1,6 +1,7 @@
 # tiny-encrypt-rs
 
-**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or MacBook with Secure Enclave get the best security effect, the key MUST support PIV or OpenPGP.
+**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or MacBook with Secure Enclave get the
+best security effect, the key MUST support PIV or OpenPGP.
 
 ![](https://cdn.hatter.ink/doc/7684_4DB4452911E2A25AB993429AA7FFCD65/yubikey-5-family.png)
 
@@ -147,9 +148,12 @@ Environment
 | TINY_ENCRYPT_DEFAULT_ALGORITHM   | Encryption algorithm, `aes` or `chacha20`   |
 | TINY_ENCRYPT_DEFAULT_COMPRESS    | File compress, `1` or `on`, default `false` |
 | TINY_ENCRYPT_NO_PROGRESS         | Do not display progress bar                 |
+| TINY_ENCRYPT_NO_DEFAULT_PIN_HINT | Do not display default PIN hint             |
+| TINY_ENCRYPT_USE_DIALOGUER       | Use dialoguer                               |
 | TINY_ENCRYPT_PIN                 | PIV Card PIN                                |
 | TINY_ENCRYPT_KEY_ID              | Default Key ID                              |
 | TINY_ENCRYPT_AUTO_SELECT_KEY_IDS | Auto select Key IDs                         |
+| TINY_ENCRYPT_PIN_ENTRY           | PIN entry command cli                       |
 | SECURE_EDITOR                    | Secure Editor                               |
 | EDITOR                           | Editor (Plaintext)                          |
 

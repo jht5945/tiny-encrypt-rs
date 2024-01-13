@@ -7,6 +7,9 @@ use std::process::Command;
 use std::time::{Instant, SystemTime};
 
 use clap::Args;
+use dialoguer::console::Term;
+use dialoguer::Select;
+use dialoguer::theme::ColorfulTheme;
 use flate2::Compression;
 use openpgp_card::crypto_data::Cryptogram;
 use rust_util::{
@@ -176,9 +179,9 @@ pub fn decrypt_single(config: &Option<TinyEncryptConfig>,
     let digest_algorithm = cmd_decrypt.digest_algorithm.as_deref().unwrap_or("sha256");
     if cmd_decrypt.digest_file { DigestWrite::from_algo(digest_algorithm)?; } // FAST CHECK
 
-    let selected_envelop = select_envelop(&meta, key_id, config)?;
+    let selected_envelop = select_envelop(&meta, key_id, config, false)?;
 
-    let key = SecVec(try_decrypt_key(config, selected_envelop, pin, slot)?);
+    let key = SecVec(try_decrypt_key(config, selected_envelop, pin, slot, false)?);
     let nonce = SecVec(opt_result!(util::decode_base64(&meta.nonce), "Decode nonce failed: {}"));
     let key_nonce = KeyNonce { k: key.as_ref(), n: nonce.as_ref() };
 
@@ -454,17 +457,18 @@ fn parse_encrypted_meta(meta: &TinyEncryptMeta, cryptor: Cryptor, key_nonce: &Ke
 pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
                        envelop: &TinyEncryptEnvelop,
                        pin: &Option<String>,
-                       slot: &Option<String>) -> XResult<Vec<u8>> {
+                       slot: &Option<String>,
+                       silent: bool) -> XResult<Vec<u8>> {
     match envelop.r#type {
         TinyEncryptEnvelopType::PgpRsa => try_decrypt_key_pgp_rsa(envelop, pin),
         TinyEncryptEnvelopType::PgpX25519 => try_decrypt_key_ecdh_pgp_x25519(envelop, pin),
         TinyEncryptEnvelopType::Gpg => try_decrypt_key_gpg(envelop),
         #[cfg(feature = "macos")]
         TinyEncryptEnvelopType::StaticX25519 => try_decrypt_key_ecdh_static_x25519(config, envelop),
-        TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::PivP384 => try_decrypt_piv_key_ecdh(config, envelop, pin, slot),
+        TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::PivP384 => try_decrypt_piv_key_ecdh(config, envelop, pin, slot, silent),
         #[cfg(feature = "secure-enclave")]
         TinyEncryptEnvelopType::KeyP256 => try_decrypt_se_key_ecdh(config, envelop),
-        TinyEncryptEnvelopType::PivRsa => try_decrypt_piv_key_rsa(config, envelop, pin, slot),
+        TinyEncryptEnvelopType::PivRsa => try_decrypt_piv_key_rsa(config, envelop, pin, slot, silent),
         #[cfg(feature = "macos")]
         TinyEncryptEnvelopType::StaticKyber1024 => try_decrypt_key_ecdh_static_kyber1204(config, envelop),
         unknown_type => simple_error!("Unknown or unsupported type: {}", unknown_type.get_name()),
@@ -474,7 +478,8 @@ pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
 fn try_decrypt_piv_key_ecdh(config: &Option<TinyEncryptConfig>,
                             envelop: &TinyEncryptEnvelop,
                             pin: &Option<String>,
-                            slot: &Option<String>) -> XResult<Vec<u8>> {
+                            slot: &Option<String>,
+                            silent: bool) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
     let (cryptor, algo_id) = match wrap_key.header.enc.as_str() {
         ENC_AES256_GCM_P256 => (Cryptor::Aes256Gcm, AlgorithmId::EccP256),
@@ -487,8 +492,8 @@ fn try_decrypt_piv_key_ecdh(config: &Option<TinyEncryptConfig>,
     let (_, subject_public_key_info) = opt_result!(
         SubjectPublicKeyInfo::from_der(&e_pub_key_bytes), "Invalid envelop: {}");
 
-    let slot = util_piv::read_piv_slot(config, &envelop.kid, slot)?;
-    let pin = util::read_pin(pin);
+    let slot = util_piv::read_piv_slot(config, &envelop.kid, slot, silent)?;
+    let pin = util::read_pin(pin)?;
     let epk_bytes = subject_public_key_info.subject_public_key.as_ref();
 
     let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
@@ -514,11 +519,12 @@ fn try_decrypt_piv_key_ecdh(config: &Option<TinyEncryptConfig>,
 fn try_decrypt_piv_key_rsa(config: &Option<TinyEncryptConfig>,
                            envelop: &TinyEncryptEnvelop,
                            pin: &Option<String>,
-                           slot: &Option<String>) -> XResult<Vec<u8>> {
+                           slot: &Option<String>,
+                           silent: bool) -> XResult<Vec<u8>> {
     let encrypted_key_bytes = opt_result!(util::decode_base64(&envelop.encrypted_key), "Decode encrypt key failed: {}");
 
-    let slot = util_piv::read_piv_slot(config, &envelop.kid, slot)?;
-    let pin = util::read_pin(pin);
+    let slot = util_piv::read_piv_slot(config, &envelop.kid, slot, silent)?;
+    let pin = util::read_pin(pin)?;
 
     let mut yk = opt_result!(YubiKey::open(), "YubiKey not found: {}");
     let slot_id = util_piv::get_slot_id(&slot)?;
@@ -699,7 +705,7 @@ fn try_decrypt_key_pgp_rsa(envelop: &TinyEncryptEnvelop, pin: &Option<String>) -
     Ok(key)
 }
 
-pub fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, config: &Option<TinyEncryptConfig>) -> XResult<&'a TinyEncryptEnvelop> {
+pub fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, config: &Option<TinyEncryptConfig>, silent: bool) -> XResult<&'a TinyEncryptEnvelop> {
     let envelops = match &meta.envelops {
         None => return simple_error!("No envelops found"),
         Some(envelops) => if envelops.is_empty() {
@@ -709,14 +715,22 @@ pub fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, co
         },
     };
 
-    success!("Found {} envelops:", envelops.len());
-    if let Some(envelop) = match_envelop_by_key_id(envelops, key_id, config) {
+    if silent {
+        debugging!("Found {} envelops:", envelops.len());
+    } else {
+        success!("Found {} envelops:", envelops.len());
+    }
+    if let Some(envelop) = match_envelop_by_key_id(envelops, key_id, config, silent) {
         return Ok(envelop);
     }
 
     if envelops.len() == 1 {
         let selected_envelop = &envelops[0];
-        success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, config));
+        if silent {
+            debugging!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, config));
+        } else {
+            success!("Auto selected envelop: #{} {}", 1, util_envelop::format_envelop(selected_envelop, config));
+        }
         if !selected_envelop.r#type.auto_select() {
             util::read_line("Press enter to continue: ");
         }
@@ -726,23 +740,46 @@ pub fn select_envelop<'a>(meta: &'a TinyEncryptMeta, key_id: &Option<String>, co
     // auto select
     if let Some(auto_select_key_ids) = util_env::get_auto_select_key_ids() {
         for auto_select_key_id in auto_select_key_ids {
-            if let Some(envelop) = match_envelop_by_key_id(envelops, &Some(auto_select_key_id), config) {
+            if let Some(envelop) = match_envelop_by_key_id(envelops, &Some(auto_select_key_id), config, silent) {
                 return Ok(envelop);
             }
         }
     }
 
-    envelops.iter().enumerate().for_each(|(i, envelop)| {
-        println_ex!("#{} {}", i + 1, util_envelop::format_envelop(envelop, config));
-    });
+    let use_dialoguer = util_env::get_use_dialoguer();
+    let envelop_number = if use_dialoguer {
+        let format_envelops = envelops.iter().map(|envelop| {
+            format!("#{}", util_envelop::format_envelop(envelop, config))
+        }).collect::<Vec<_>>();
+        util::register_ctrlc();
+        let select_result = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Please select envelop: ")
+            .items(&format_envelops[..])
+            .default(0)
+            .report(!silent)
+            .clear(true)
+            .interact();
+        if select_result.is_err() {
+            let _ = Term::stderr().show_cursor();
+        }
+        opt_result!(select_result, "Select envelop error: {}") + 1
+    } else {
+        envelops.iter().enumerate().for_each(|(i, envelop)| {
+            println_ex!("#{} {}", i + 1, util_envelop::format_envelop(envelop, config));
+        });
+        util::read_number("Please select an envelop:", 1, envelops.len())
+    };
 
-    let envelop_number = util::read_number("Please select an envelop:", 1, envelops.len());
     let selected_envelop = &envelops[envelop_number - 1];
-    success!("Selected envelop: #{} {}", envelop_number, selected_envelop.r#type.get_upper_name());
+    if silent {
+        debugging!("Selected envelop: #{} {}", envelop_number, selected_envelop.r#type.get_upper_name());
+    } else {
+        success!("Selected envelop: #{} {}", envelop_number, selected_envelop.r#type.get_upper_name());
+    }
     Ok(selected_envelop)
 }
 
-fn match_envelop_by_key_id<'a>(envelops: &'a Vec<TinyEncryptEnvelop>, key_id: &Option<String>, config: &Option<TinyEncryptConfig>) -> Option<&'a TinyEncryptEnvelop> {
+fn match_envelop_by_key_id<'a>(envelops: &'a Vec<TinyEncryptEnvelop>, key_id: &Option<String>, config: &Option<TinyEncryptConfig>, silent: bool) -> Option<&'a TinyEncryptEnvelop> {
     if let Some(key_id) = key_id {
         for envelop in envelops {
             let is_sid_matched = config.as_ref().and_then(|config| {
@@ -752,7 +789,11 @@ fn match_envelop_by_key_id<'a>(envelops: &'a Vec<TinyEncryptEnvelop>, key_id: &O
             }).unwrap_or(false);
 
             if is_sid_matched || (&envelop.kid == key_id) {
-                information!("Matched envelop: {}", util_envelop::format_envelop(envelop, config));
+                if silent {
+                    debugging!("Matched envelop: {}", util_envelop::format_envelop(envelop, config));
+                } else {
+                    information!("Matched envelop: {}", util_envelop::format_envelop(envelop, config));
+                }
                 return Some(envelop);
             }
         }
