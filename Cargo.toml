@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "1.7.6"
+version = "1.7.11"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -18,7 +18,7 @@ secure-enclave = ["macos", "swift-rs"]
 [dependencies]
 aes-gcm-stream = "0.2"
 base64 = "0.21"
-chacha20-poly1305-stream = "0.1.0"
+chacha20-poly1305-stream = "0.1"
 chrono = "0.4"
 clap = { version = "4.4", features = ["derive"] }
 flate2 = "1.0"
@@ -35,23 +35,23 @@ rpassword = "7.3"
 rsa = { version = "0.9", features = ["pem"] }
 rust-crypto = "0.2"
 rust_util = "0.6"
-security-framework = { version = "2.9.2", features = ["OSX_10_15"], optional = true }
+security-framework = { version = "2.9", features = ["OSX_10_15"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 simpledateformat = "0.1"
-tabled = "0.14"
+tabled = "0.15"
 x25519-dalek = { version = "2.0", features = ["static_secrets", "getrandom"] }
 x509-parser = "0.15"
 yubikey = { version = "0.8", features = ["untested"], optional = true }
 zeroize = "1.7"
 swift-rs = { path = "swift-rs", optional = true }
-spki = "0.7.3"
-pqcrypto-kyber = "0.8.0"
-pqcrypto-traits = "0.3.5"
-pinentry = "0.5.0"
-secrecy = "0.8.0"
-dialoguer = "0.11.0"
-ctrlc = "3.4.2"
+spki = "0.7"
+pqcrypto-kyber = "0.8"
+pqcrypto-traits = "0.3"
+pinentry = "0.5"
+secrecy = "0.8"
+dialoguer = "0.11"
+ctrlc = "3.4"
 
 [build-dependencies]
 swift-rs = { path = "swift-rs", features = ["build"], optional = true }

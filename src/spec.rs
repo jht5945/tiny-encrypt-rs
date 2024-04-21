@@ -140,7 +140,7 @@ impl TinyEncryptEnvelopType {
         }
     }
 
-    pub fn is_hardware_security(&self) -> bool {
+    pub fn is_hardware_security(&self) -> Option<bool> {
         match self {
             TinyEncryptEnvelopType::PgpRsa
             | TinyEncryptEnvelopType::PgpX25519
@@ -148,11 +148,12 @@ impl TinyEncryptEnvelopType {
             | TinyEncryptEnvelopType::PivP256
             | TinyEncryptEnvelopType::PivP384
             | TinyEncryptEnvelopType::PivRsa
-            | TinyEncryptEnvelopType::Age => true,
+            | TinyEncryptEnvelopType::Age => Some(true),
             TinyEncryptEnvelopType::StaticX25519
             | TinyEncryptEnvelopType::StaticKyber1024
-            | TinyEncryptEnvelopType::Gpg // GPG is unknown(hardware/software)
-            | TinyEncryptEnvelopType::Kms => false,
+            | TinyEncryptEnvelopType::Kms => Some(false),
+            // GPG is unknown(hardware/software)
+            TinyEncryptEnvelopType::Gpg => None,
         }
     }
 }

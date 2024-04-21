@@ -145,7 +145,9 @@ fn parse_output_to_env(output: &str) -> Vec<(String, String)> {
     } else {
         let lines = output.split('\n');
         lines.filter(|ln| !ln.trim().is_empty()).for_each(|ln| {
-            if ln.contains('=') {
+            if ln.starts_with('#') {
+                debugging!("Found comment: {}", ln);
+            } else if ln.contains('=') {
                 let k = ln.chars().take_while(|c| c != &'=').collect::<String>();
                 let v = ln.chars().skip_while(|c| c != &'=').skip(1).collect::<String>();
                 env.push((k, v));

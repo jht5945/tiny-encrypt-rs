@@ -71,8 +71,12 @@ fn config_key_filter(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XRe
     information!("Found {} envelops", envelops.len());
     let mut config_envelops = vec![];
     for envelop in envelops {
+        let hardware_security_mark = match envelop.r#type.is_hardware_security() {
+            None => " ?",
+            Some(hardware_security) => iff!(hardware_security, " *", "")
+        };
         config_envelops.push(ConfigEnvelop {
-            r#type: format!("{}{}", envelop.r#type.get_name(), iff!(envelop.r#type.is_hardware_security(), " *", "")),
+            r#type: format!("{}{}", envelop.r#type.get_name(), hardware_security_mark),
             sid: strip_field(&envelop.sid.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()), 25),
             kid: strip_field(&envelop.kid, 40),
             desc: strip_field(&envelop.desc.as_ref().map(ToString::to_string).unwrap_or_else(|| "-".to_string()), 40),

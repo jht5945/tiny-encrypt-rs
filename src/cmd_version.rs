@@ -1,5 +1,5 @@
 use clap::Args;
-use rust_util::{iff, XResult};
+use rust_util::XResult;
 
 use crate::util;
 #[cfg(feature = "secure-enclave")]
@@ -17,7 +17,7 @@ pub fn version(_cmd_version: CmdVersion) -> XResult<()> {
     #[cfg(feature = "smartcard")]
     features.push("smartcard".to_string());
     #[cfg(feature = "secure-enclave")]
-    features.push(format!("secure-enclave{}", iff!(util_keychainkey::is_support_se(), "*", "")));
+    features.push(format!("secure-enclave{}", rust_util::iff!(util_keychainkey::is_support_se(), "*", "")));
     if features.is_empty() { features.push("-".to_string()); }
     println!(
         "User-Agent: {} [with features: {}]\n{}",

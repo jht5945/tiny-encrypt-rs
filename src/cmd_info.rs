@@ -72,8 +72,12 @@ pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo, config: &Option<TinyEncry
         ));
     } else {
         infos.push(format!("{}: {}", header("File size"),
-                           util_size::get_display_size(meta.file_length as i64)));
+                           util_size::get_display_size(meta.file_length as i64)
+        ));
     }
+    infos.push(format!("{}: {}",
+                       header("Meta size"), util_size::get_display_size(meta_len as i64))
+    );
 
     infos.push(format!("{}: Version: {}, Agent: {}",
                        header("File summary"), meta.version, meta.user_agent)
