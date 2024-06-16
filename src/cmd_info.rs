@@ -13,7 +13,8 @@ use simpledateformat::format_human2;
 
 use crate::{config, util, util_enc_file, util_envelop};
 use crate::config::TinyEncryptConfig;
-use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT};
+use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM, TINY_ENC_CONFIG_FILE};
+use crate::util::is_tiny_enc_file;
 use crate::wrap_key::WrapKey;
 
 #[derive(Debug, Args)]
@@ -41,7 +42,7 @@ pub fn info(cmd_info: CmdInfo) -> XResult<()> {
 
 pub fn info_single(path: &PathBuf, cmd_info: &CmdInfo, config: &Option<TinyEncryptConfig>) -> XResult<()> {
     let path_display = format!("{}", path.display());
-    if !path_display.ends_with(TINY_ENC_FILE_EXT) {
+    if !is_tiny_enc_file(&path_display) {
         return simple_error!("Not a Tiny Encrypt file: {}", path_display);
     }
 

@@ -14,7 +14,7 @@ use rust_util::{information, opt_result, print_ex, simple_error, util_term, warn
 use secrecy::ExposeSecret;
 use zeroize::Zeroize;
 
-use crate::consts::TINY_ENC_FILE_EXT;
+use crate::consts::{TINY_ENC_FILE_EXT, TINY_ENC_PEM_FILE_EXT};
 use crate::util_digest::DigestWrite;
 use crate::util_env;
 
@@ -213,6 +213,10 @@ pub fn read_number(hint: &str, from: usize, to: usize) -> usize {
     }
 }
 
+pub fn is_tiny_enc_file(filename: &str) -> bool {
+    filename.ends_with(TINY_ENC_FILE_EXT) || filename.ends_with(TINY_ENC_PEM_FILE_EXT)
+}
+
 pub fn get_user_agent() -> String {
     format!("TinyEncrypt-rs v{}@{}-{}", env!("CARGO_PKG_VERSION"), get_os(), get_arch())
 }
@@ -287,9 +291,11 @@ pub fn ratio(numerator: u64, denominator: u64) -> String {
     format!("{:.2}", r as f64 / 100f64)
 }
 
+#[allow(clippy::declare_interior_mutable_const)]
 const CTRL_C_SET: AtomicBool = AtomicBool::new(false);
 
 pub fn register_ctrlc() {
+    #[allow(clippy::borrow_interior_mutable_const)]
     if !CTRL_C_SET.load(Ordering::SeqCst) {
         CTRL_C_SET.store(true, Ordering::SeqCst);
         let _ = ctrlc::set_handler(move || {

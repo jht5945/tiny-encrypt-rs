@@ -51,8 +51,8 @@ pub fn gpg_encrypt(key_id: &str, message: &[u8]) -> XResult<String> {
     let gpg_encrypt_result = cmd
         .args([
             "-e", "-a", "--no-comment",
-            "-r", &key_id,
-            "--comment", &format!("tiny-encrypt-v{} - {}", env!("CARGO_PKG_VERSION"), &key_id)
+            "-r", key_id,
+            "--comment", &format!("tiny-encrypt-v{} - {}", env!("CARGO_PKG_VERSION"), key_id)
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

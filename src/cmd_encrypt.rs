@@ -7,26 +7,19 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_size, XResult};
+use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_size, warning, XResult};
 use rust_util::util_time::UnixEpochTime;
 
 use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env, util_gpg};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
-use crate::consts::{
-    ENC_AES256_GCM_KYBER1204,
-    ENC_AES256_GCM_P256, ENC_AES256_GCM_P384,
-    ENC_AES256_GCM_X25519,
-    ENC_CHACHA20_POLY1305_KYBER1204,
-    ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384,
-    ENC_CHACHA20_POLY1305_X25519,
-    SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
-};
+use crate::consts::{ENC_AES256_GCM_KYBER1204, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, ENC_CHACHA20_POLY1305_KYBER1204, ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT, TINY_ENC_PEM_FILE_EXT, TINY_ENC_PEM_NAME};
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{
     EncEncryptedMeta, EncMetadata,
     TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta,
 };
+use crate::util::{is_tiny_enc_file, to_pem};
 use crate::util_ecdh::{ecdh_kyber1024, ecdh_p256, ecdh_p384, ecdh_x25519};
 use crate::util_progress::Progress;
 use crate::util_rsa;
@@ -69,6 +62,10 @@ pub struct CmdEncrypt {
     /// Disable compress meta
     #[arg(long)]
     pub disable_compress_meta: bool,
+
+    /// Output file in PEM format (alias --pem)
+    #[arg(long, alias = "pem")]
+    pub pem_output: bool,
 
     /// Encryption algorithm (AES/GCM, CHACHA20/POLY1305 or AES, CHACHA20, default AES/GCM)
     #[arg(long, short = 'A')]
@@ -130,7 +127,11 @@ pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
 
 pub fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
-    let path_out = format!("{}{}", path_display, TINY_ENC_FILE_EXT);
+    let path_out = if cmd_encrypt.pem_output {
+        format!("{}{}", path_display, TINY_ENC_PEM_FILE_EXT)
+    } else {
+        format!("{}{}", path_display, TINY_ENC_FILE_EXT)
+    };
     let encrypt_single_result = encrypt_single_file_out(path, &path_out, envelops, cmd_encrypt);
     if cmd_encrypt.create {
         if let Ok(content) = fs::read_to_string(path) {
@@ -144,7 +145,7 @@ pub fn encrypt_single(path: &PathBuf, envelops: &[&TinyEncryptConfigEnvelop], cm
 
 pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&TinyEncryptConfigEnvelop], cmd_encrypt: &CmdEncrypt) -> XResult<u64> {
     let path_display = format!("{}", path.display());
-    if path_display.ends_with(TINY_ENC_FILE_EXT) {
+    if is_tiny_enc_file(&path_display) {
         information!("Tiny enc file skipped: {}", path_display);
         return Ok(0);
     }
@@ -184,7 +185,7 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
     let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(
         cryptor, &key_nonce), "Seal enc-encrypted-meta failed: {}");
 
-    let compress_level = get_compress_level(cmd_encrypt);
+    let compress_level = get_compress_level(cmd_encrypt, cmd_encrypt.pem_output);
 
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
@@ -197,21 +198,37 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
         &file_metadata, &enc_metadata, cryptor, nonce.as_ref(), envelops);
     debugging!("Encrypted meta: {:?}", encrypt_meta);
 
+    let start = Instant::now();
+
     let mut file_out = File::create(path_out)?;
     let compress_meta = !cmd_encrypt.disable_compress_meta;
-    let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
 
-    let compress_desc = iff!(compress_level.is_some(), " [with compress]", "");
+    if cmd_encrypt.pem_output {
+        let temp_output_len = file_in.metadata().map(|m| m.len()).unwrap_or(0) + 1024 * 8;
+        if temp_output_len > 8 * 1024 * 1028 {
+            warning!("Input file is more than 8 MiB.");
+        }
+        if temp_output_len > 32 * 1024 * 1028 {
+            return simple_error!("Input file is too large, file is {} bytes", temp_output_len);
+        }
+        let mut temp_output = Vec::with_capacity(temp_output_len as usize);
+        let _ = util_enc_file::write_tiny_encrypt_meta(&mut temp_output, &encrypt_meta, compress_meta)?;
+        encrypt_file(&mut file_in, file_metadata.len(), &mut temp_output,
+                     cryptor, &key_nonce, &compress_level,
+        )?;
+        let temp_output_pem = to_pem(&temp_output, TINY_ENC_PEM_NAME);
+        file_out.write_all(temp_output_pem.as_bytes())?;
+    } else {
+        let _ = util_enc_file::write_tiny_encrypt_meta(&mut file_out, &encrypt_meta, compress_meta)?;
+        encrypt_file(&mut file_in, file_metadata.len(), &mut file_out,
+                     cryptor, &key_nonce, &compress_level,
+        )?;
+    }
 
-    let start = Instant::now();
-    encrypt_file(
-        &mut file_in, file_metadata.len(), &mut file_out, cryptor,
-        &key_nonce, &compress_level,
-    )?;
     drop(file_out);
     let encrypt_duration = start.elapsed();
+    let compress_desc = iff!(compress_level.is_some(), " [with compress]", "");
     debugging!("Inner encrypt file{}: {} elapsed: {} ms", compress_desc, path_display, encrypt_duration.as_millis());
-
     if cmd_encrypt.remove_file { util::remove_file_with_msg(path); }
     Ok(file_metadata.len())
 }
@@ -395,9 +412,11 @@ fn encrypt_envelop_gpg(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResul
     })
 }
 
-fn get_compress_level(cmd_encrypt: &CmdEncrypt) -> Option<u32> {
+fn get_compress_level(cmd_encrypt: &CmdEncrypt, pem_output: bool) -> Option<u32> {
     if cmd_encrypt.compress || util_env::get_default_compress().unwrap_or(false) {
         Some(cmd_encrypt.compress_level.unwrap_or_else(|| Compression::default().level()))
+    } else if pem_output {
+        Some(Compression::best().level())
     } else {
         None
     }
