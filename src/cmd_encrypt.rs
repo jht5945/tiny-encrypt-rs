@@ -7,10 +7,9 @@ use std::time::Instant;
 use clap::Args;
 use flate2::Compression;
 use rsa::Pkcs1v15Encrypt;
-use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_size, warning, XResult};
 use rust_util::util_time::UnixEpochTime;
+use rust_util::{debugging, failure, iff, information, opt_result, simple_error, success, util_size, warning, XResult};
 
-use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env, util_gpg};
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
 use crate::consts::{ENC_AES256_GCM_KYBER1204, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, ENC_CHACHA20_POLY1305_KYBER1204, ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT, TINY_ENC_PEM_FILE_EXT, TINY_ENC_PEM_NAME};
@@ -24,6 +23,7 @@ use crate::util_ecdh::{ecdh_kyber1024, ecdh_p256, ecdh_p384, ecdh_x25519};
 use crate::util_progress::Progress;
 use crate::util_rsa;
 use crate::wrap_key::{WrapKey, WrapKeyHeader};
+use crate::{crypto_cryptor, crypto_simple, util, util_enc_file, util_env, util_gpg};
 
 #[derive(Debug, Args)]
 pub struct CmdEncrypt {
@@ -185,7 +185,8 @@ pub fn encrypt_single_file_out(path: &PathBuf, path_out: &str, envelops: &[&Tiny
     let enc_encrypted_meta_bytes = opt_result!(enc_encrypted_meta.seal(
         cryptor, &key_nonce), "Seal enc-encrypted-meta failed: {}");
 
-    let compress_level = get_compress_level(cmd_encrypt, cmd_encrypt.pem_output);
+    let compress_level = get_compress_level(cmd_encrypt, &path_display, cmd_encrypt.pem_output);
+    debugging!("Compress level: {:?}", compress_level);
 
     let enc_metadata = EncMetadata {
         comment: cmd_encrypt.comment.clone(),
@@ -412,8 +413,16 @@ fn encrypt_envelop_gpg(key: &[u8], envelop: &TinyEncryptConfigEnvelop) -> XResul
     })
 }
 
-fn get_compress_level(cmd_encrypt: &CmdEncrypt, pem_output: bool) -> Option<u32> {
-    if cmd_encrypt.compress || util_env::get_default_compress().unwrap_or(false) {
+fn get_compress_level(cmd_encrypt: &CmdEncrypt, path: &str, pem_output: bool) -> Option<u32> {
+    let mut auto_compress = false;
+    let path_parts = path.split(".").collect::<Vec<_>>();
+    let path_ext = path_parts[path_parts.len() - 1].to_lowercase();
+    if let Some(auto_compress_file_exts) = util_env::get_auto_compress_file_exts() {
+        auto_compress = auto_compress_file_exts.contains(&path_ext);
+        debugging!("File ext: {} matches auto compress exts: {:?}", path_ext, auto_compress_file_exts);
+    }
+
+    if auto_compress || cmd_encrypt.compress || util_env::get_default_compress().unwrap_or(false) {
         Some(cmd_encrypt.compress_level.unwrap_or_else(|| Compression::default().level()))
     } else if pem_output {
         Some(Compression::best().level())

@@ -153,6 +153,7 @@ Environment
 | TINY_ENCRYPT_PIN                 | PIV Card PIN                                |
 | TINY_ENCRYPT_KEY_ID              | Default Key ID                              |
 | TINY_ENCRYPT_AUTO_SELECT_KEY_IDS | Auto select Key IDs                         |
+| TINY_ENCRYPT_AUTO_COMPRESS_EXTS  | Auto compress file exts                     |
 | TINY_ENCRYPT_PIN_ENTRY           | PIN entry command cli                       |
 | SECURE_EDITOR                    | Secure Editor                               |
 | EDITOR                           | Editor (Plaintext)                          |
