@@ -3,7 +3,6 @@ extern crate core;
 use clap::{Parser, Subcommand};
 use rust_util::XResult;
 
-use tiny_encrypt::{CmdConfig, CmdDirectDecrypt, CmdEncrypt, CmdInfo, CmdVersion};
 #[cfg(feature = "decrypt")]
 use tiny_encrypt::CmdDecrypt;
 #[cfg(feature = "decrypt")]
@@ -12,6 +11,7 @@ use tiny_encrypt::CmdExecEnv;
 use tiny_encrypt::CmdInitKeychain;
 #[cfg(feature = "smartcard")]
 use tiny_encrypt::CmdInitPiv;
+use tiny_encrypt::{CmdConfig, CmdDirectDecrypt, CmdEncrypt, CmdInfo, CmdSimpleDecrypt, CmdSimpleEncrypt, CmdVersion};
 
 #[derive(Debug, Parser)]
 #[command(name = "tiny-encrypt-rs")]
@@ -26,6 +26,12 @@ enum Commands {
     /// Encrypt file(s)
     #[command(arg_required_else_help = true, short_flag = 'e')]
     Encrypt(CmdEncrypt),
+    /// Simple encrypt message
+    #[command(arg_required_else_help = true)]
+    SimpleEncrypt(CmdSimpleEncrypt),
+    /// Simple decrypt message
+    #[command(arg_required_else_help = true)]
+    SimpleDecrypt(CmdSimpleDecrypt),
     #[cfg(feature = "decrypt")]
     /// Decrypt file(s)
     #[command(arg_required_else_help = true, short_flag = 'd')]
@@ -60,6 +66,8 @@ fn main() -> XResult<()> {
     let args = Cli::parse();
     match args.command {
         Commands::Encrypt(cmd_encrypt) => tiny_encrypt::encrypt(cmd_encrypt),
+        Commands::SimpleEncrypt(cmd_simple_encrypt) => tiny_encrypt::simple_encrypt(cmd_simple_encrypt),
+        Commands::SimpleDecrypt(cmd_simple_decrypt) => tiny_encrypt::simple_decrypt(cmd_simple_decrypt),
         #[cfg(feature = "decrypt")]
         Commands::Decrypt(cmd_decrypt) => tiny_encrypt::decrypt(cmd_decrypt),
         Commands::DirectDecrypt(cmd_direct_decrypt) => tiny_encrypt::direct_decrypt(cmd_direct_decrypt),

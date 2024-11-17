@@ -313,8 +313,8 @@ fn run_file_editor_and_wait_content(editor: &str, temp_file: &PathBuf, secure_ed
     command.arg(temp_file.to_str().expect("Get temp file path failed."));
     if secure_editor {
         command.arg("aes-256-gcm");
-        command.arg(&hex::encode(&temp_encryption_key_nonce.0));
-        command.arg(&hex::encode(&temp_encryption_key_nonce.1));
+        command.arg(hex::encode(&temp_encryption_key_nonce.0));
+        command.arg(hex::encode(&temp_encryption_key_nonce.1));
         if readonly { command.env("READONLY", "true"); }
     }
     debugging!("Run cmd: {:?}", command);

@@ -295,7 +295,7 @@ pub(crate) fn encrypt_file(file_in: &mut impl Read, file_len: u64, file_out: &mu
     Ok(total_len)
 }
 
-fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfigEnvelop]) -> XResult<Vec<TinyEncryptEnvelop>> {
+pub fn encrypt_envelops(cryptor: Cryptor, key: &[u8], envelops: &[&TinyEncryptConfigEnvelop]) -> XResult<Vec<TinyEncryptEnvelop>> {
     let mut encrypted_envelops = vec![];
     for envelop in envelops {
         match envelop.r#type {

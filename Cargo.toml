@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "1.7.14"
+version = "1.8.1"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -9,7 +9,8 @@ repository = "https://git.hatter.ink/hatter/tiny-encrypt-rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["decrypt", "macos", "smartcard", "secure-enclave"]
+default = ["decrypt", "macos", "smartcard"]
+full-features = ["decrypt", "macos", "smartcard", "secure-enclave"]
 decrypt = ["smartcard"]
 smartcard = ["openpgp-card", "openpgp-card-pcsc", "yubikey"]
 macos = ["security-framework"]
@@ -17,7 +18,7 @@ secure-enclave = ["macos", "swift-rs"]
 
 [dependencies]
 aes-gcm-stream = "0.2"
-base64 = "0.21"
+base64 = "0.22"
 chacha20-poly1305-stream = "0.1"
 chrono = "0.4"
 clap = { version = "4.4", features = ["derive"] }
@@ -33,31 +34,28 @@ rand = "0.8"
 # reqwest = { version = "0.11", features = ["blocking", "rustls", "rustls-tls"] }
 rpassword = "7.3"
 rsa = { version = "0.9", features = ["pem"] }
-rust-crypto = "0.2"
+rust-crypto-hatter-fork = "0.2"
 rust_util = "0.6"
-security-framework = { version = "2.9", features = ["OSX_10_15"], optional = true }
+security-framework = { version = "3.0", features = ["OSX_10_15"], optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 simpledateformat = "0.1"
-tabled = "0.15"
+tabled = "0.16"
 x25519-dalek = { version = "2.0", features = ["static_secrets", "getrandom"] }
-x509-parser = "0.15"
+x509-parser = "0.16"
 yubikey = { version = "0.8", features = ["untested"], optional = true }
 zeroize = "1.7"
-swift-rs = { path = "swift-rs", optional = true }
+swift-rs = { version = "1.0.7", optional = true }
 spki = "0.7"
 pqcrypto-kyber = "0.8"
 pqcrypto-traits = "0.3"
-pinentry = "0.5"
-secrecy = "0.8"
+pinentry = "0.6"
+secrecy = "0.10"
 dialoguer = "0.11"
 ctrlc = "3.4"
 
 [build-dependencies]
-swift-rs = { path = "swift-rs", features = ["build"], optional = true }
-
-[patch.crates-io]
-rust-crypto = { git = "https://github.com/jht5945/rust-crypto.git" }
+swift-rs = { version = "1.0.7", features = ["build"], optional = true }
 
 [profile.release]
 codegen-units = 1

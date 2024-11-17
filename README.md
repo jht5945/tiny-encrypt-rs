@@ -26,6 +26,12 @@ Compile only encrypt:
 cargo build --release --no-default-features
 ```
 
+Install from git:
+
+```shell
+git install --git https://git.hatter.ink/hatter/tiny-encrypt-rs.git --features full-features
+```
+
 Edit encrypted file:
 
 ```shell

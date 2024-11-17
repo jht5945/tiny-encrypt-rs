@@ -1,13 +1,13 @@
-use std::{fs, io};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::{fs, io};
 
-use base64::Engine;
 use base64::engine::general_purpose;
-use dialoguer::Confirm;
+use base64::Engine;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
+use dialoguer::Confirm;
 use pinentry::PassphraseInput;
 use rand::random;
 use rust_util::{information, opt_result, print_ex, simple_error, util_term, warning, XResult};
@@ -30,6 +30,13 @@ impl AsRef<[u8]> for SecVec {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
+}
+
+pub fn read_stdin() -> XResult<Vec<u8>> {
+    let mut buffer = vec![];
+    let mut stdin = io::stdin();
+    opt_result!(stdin.read_to_end(&mut buffer), "Read stdin failed: {}");
+    Ok(buffer)
 }
 
 pub fn read_pin(pin: &Option<String>) -> XResult<String> {

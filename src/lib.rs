@@ -9,9 +9,13 @@ pub use cmd_decrypt::decrypt_single;
 pub use cmd_directdecrypt::CmdDirectDecrypt;
 pub use cmd_directdecrypt::direct_decrypt;
 pub use cmd_encrypt::CmdEncrypt;
+pub use cmd_simple_encrypt_decrypt::CmdSimpleEncrypt;
+pub use cmd_simple_encrypt_decrypt::CmdSimpleDecrypt;
 pub use cmd_encrypt::encrypt;
 pub use cmd_encrypt::encrypt_single;
 pub use cmd_encrypt::encrypt_single_file_out;
+pub use cmd_simple_encrypt_decrypt::simple_encrypt;
+pub use cmd_simple_encrypt_decrypt::simple_decrypt;
 #[cfg(feature = "decrypt")]
 pub use cmd_execenv::CmdExecEnv;
 #[cfg(feature = "decrypt")]
@@ -57,6 +61,7 @@ mod cmd_info;
 #[cfg(feature = "decrypt")]
 mod cmd_decrypt;
 mod cmd_encrypt;
+mod cmd_simple_encrypt_decrypt;
 mod cmd_directdecrypt;
 #[cfg(feature = "macos")]
 mod cmd_initkeychain;
