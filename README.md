@@ -1,7 +1,9 @@
 # tiny-encrypt-rs
 
-**IMPORTANT**: To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or MacBook with Secure Enclave get the
+> [!IMPORTANT]  
+> To use tiny-encrypt, a Yubikey(https://www.yubico.com/products/) or MacBook with Secure Enclave get the
 best security effect, the key MUST support PIV or OpenPGP.
+
 
 ![](https://cdn.hatter.ink/doc/7684_4DB4452911E2A25AB993429AA7FFCD65/yubikey-5-family.png)
 
