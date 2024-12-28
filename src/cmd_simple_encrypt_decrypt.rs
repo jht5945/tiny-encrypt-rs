@@ -1,4 +1,3 @@
-use crate::cmd_decrypt::try_decrypt_key;
 use crate::config::TinyEncryptConfig;
 use crate::consts::TINY_ENC_CONFIG_FILE;
 use crate::spec::TinyEncryptEnvelop;
@@ -155,6 +154,7 @@ pub fn simple_encrypt(cmd_simple_encrypt: CmdSimpleEncrypt) -> XResult<()> {
     Ok(())
 }
 
+#[cfg(feature = "decrypt")]
 pub fn simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()> {
     let direct_output = cmd_simple_decrypt.direct_output;
     if let Err(inner_result_error) = inner_simple_decrypt(cmd_simple_decrypt) {
@@ -195,6 +195,7 @@ pub fn inner_simple_encrypt(cmd_simple_encrypt: CmdSimpleEncrypt) -> XResult<()>
     CmdResult::success(&simple_encrypt_result).print_exit(cmd_simple_encrypt.direct_output);
 }
 
+#[cfg(feature = "decrypt")]
 pub fn inner_simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()> {
     let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
 
@@ -236,7 +237,7 @@ pub fn inner_simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()>
     if filter_envelops.len() > 1 {
         return simple_error!("too many envelops: {:?}, len: {}", cmd_simple_decrypt.key_id, filter_envelops.len());
     }
-    let value = try_decrypt_key(&config, filter_envelops[0], &pin, &slot, false)?;
+    let value = crate::cmd_decrypt::try_decrypt_key(&config, filter_envelops[0], &pin, &slot, false)?;
     if cmd_simple_decrypt.direct_output && output_format == "plain" {
         io::stdout().write_all(&value).expect("unable to write to stdout");
         exit(0);

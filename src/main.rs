@@ -29,6 +29,7 @@ enum Commands {
     /// Simple encrypt message
     #[command(arg_required_else_help = true)]
     SimpleEncrypt(CmdSimpleEncrypt),
+    #[cfg(feature = "decrypt")]
     /// Simple decrypt message
     #[command(arg_required_else_help = true)]
     SimpleDecrypt(CmdSimpleDecrypt),
@@ -67,6 +68,7 @@ fn main() -> XResult<()> {
     match args.command {
         Commands::Encrypt(cmd_encrypt) => tiny_encrypt::encrypt(cmd_encrypt),
         Commands::SimpleEncrypt(cmd_simple_encrypt) => tiny_encrypt::simple_encrypt(cmd_simple_encrypt),
+        #[cfg(feature = "decrypt")]
         Commands::SimpleDecrypt(cmd_simple_decrypt) => tiny_encrypt::simple_decrypt(cmd_simple_decrypt),
         #[cfg(feature = "decrypt")]
         Commands::Decrypt(cmd_decrypt) => tiny_encrypt::decrypt(cmd_decrypt),

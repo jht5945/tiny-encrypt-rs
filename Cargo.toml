@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "1.8.1"
+version = "1.8.3"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -40,7 +40,7 @@ security-framework = { version = "3.0", features = ["OSX_10_15"], optional = tru
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 simpledateformat = "0.1"
-tabled = "0.16"
+tabled = "0.17"
 x25519-dalek = { version = "2.0", features = ["static_secrets", "getrandom"] }
 x509-parser = "0.16"
 yubikey = { version = "0.8", features = ["untested"], optional = true }

@@ -15,6 +15,7 @@ pub use cmd_encrypt::encrypt;
 pub use cmd_encrypt::encrypt_single;
 pub use cmd_encrypt::encrypt_single_file_out;
 pub use cmd_simple_encrypt_decrypt::simple_encrypt;
+#[cfg(feature = "decrypt")]
 pub use cmd_simple_encrypt_decrypt::simple_decrypt;
 #[cfg(feature = "decrypt")]
 pub use cmd_execenv::CmdExecEnv;
@@ -33,6 +34,7 @@ pub use cmd_initpiv::CmdInitPiv;
 pub use cmd_initpiv::init_piv;
 pub use cmd_version::CmdVersion;
 pub use cmd_version::version;
+pub use config::TinyEncryptConfig;
 
 mod consts;
 mod util;
