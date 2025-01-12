@@ -7,7 +7,6 @@ use tabled::{Table, Tabled};
 use tabled::settings::Style;
 
 use crate::config::TinyEncryptConfig;
-use crate::consts::TINY_ENC_CONFIG_FILE;
 use crate::util_envelop;
 
 #[derive(Tabled, Eq)]
@@ -57,7 +56,7 @@ pub struct CmdConfig {
 }
 
 pub fn config(cmd_version: CmdConfig) -> XResult<()> {
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE)?;
+    let config = TinyEncryptConfig::load_default()?;
 
     if cmd_version.profile.is_some() || cmd_version.key_filter.is_some() {
         return config_key_filter(&cmd_version, &config);

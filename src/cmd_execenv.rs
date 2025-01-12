@@ -11,7 +11,6 @@ use zeroize::Zeroize;
 use crate::{config, consts, util, util_env};
 use crate::cmd_decrypt::{decrypt_limited_content_to_vec, select_envelop, try_decrypt_key};
 use crate::config::TinyEncryptConfig;
-use crate::consts::TINY_ENC_CONFIG_FILE;
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::util::SecVec;
 use crate::util_enc_file;
@@ -46,7 +45,7 @@ impl Drop for CmdExecEnv {
 pub fn exec_env(cmd_exec_env: CmdExecEnv) -> XResult<()> {
     util_msg::set_logger_std_out(false);
     debugging!("Cmd exec env: {:?}", cmd_exec_env);
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
+    let config = TinyEncryptConfig::load_default().ok();
     if cmd_exec_env.command_arguments.is_empty() {
         return simple_error!("No commands assigned.");
     }

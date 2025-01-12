@@ -1,5 +1,4 @@
 use crate::config::TinyEncryptConfig;
-use crate::consts::TINY_ENC_CONFIG_FILE;
 use crate::spec::TinyEncryptEnvelop;
 use crate::{cmd_encrypt, crypto_cryptor, util, util_env};
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
@@ -164,7 +163,7 @@ pub fn simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()> {
 }
 
 pub fn inner_simple_encrypt(cmd_simple_encrypt: CmdSimpleEncrypt) -> XResult<()> {
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE)?;
+    let config = TinyEncryptConfig::load_default()?;
     debugging!("Found tiny encrypt config: {:?}", config);
     let envelops = config.find_envelops(&cmd_simple_encrypt.profile, &cmd_simple_encrypt.key_filter)?;
     if envelops.is_empty() { return simple_error!("Cannot find any valid envelops"); }
@@ -197,7 +196,7 @@ pub fn inner_simple_encrypt(cmd_simple_encrypt: CmdSimpleEncrypt) -> XResult<()>
 
 #[cfg(feature = "decrypt")]
 pub fn inner_simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()> {
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
+    let config = TinyEncryptConfig::load_default().ok();
 
     let pin = cmd_simple_decrypt.pin.clone().or_else(util_env::get_pin);
     let slot = cmd_simple_decrypt.slot.clone();

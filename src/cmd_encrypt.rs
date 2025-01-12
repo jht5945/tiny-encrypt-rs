@@ -12,7 +12,12 @@ use rust_util::{debugging, failure, iff, information, opt_result, simple_error, 
 
 use crate::compress::GzStreamEncoder;
 use crate::config::{TinyEncryptConfig, TinyEncryptConfigEnvelop};
-use crate::consts::{ENC_AES256_GCM_KYBER1204, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519, ENC_CHACHA20_POLY1305_KYBER1204, ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519, SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT, TINY_ENC_PEM_FILE_EXT, TINY_ENC_PEM_NAME};
+use crate::consts::{
+    ENC_AES256_GCM_KYBER1204, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384, ENC_AES256_GCM_X25519,
+    ENC_CHACHA20_POLY1305_KYBER1204, ENC_CHACHA20_POLY1305_P256, ENC_CHACHA20_POLY1305_P384,
+    ENC_CHACHA20_POLY1305_X25519, SALT_COMMENT, TINY_ENC_FILE_EXT, TINY_ENC_PEM_FILE_EXT,
+    TINY_ENC_PEM_NAME,
+};
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{
     EncEncryptedMeta, EncMetadata,
@@ -76,7 +81,7 @@ pub struct CmdEncrypt {
 }
 
 pub fn encrypt(cmd_encrypt: CmdEncrypt) -> XResult<()> {
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE)?;
+    let config = TinyEncryptConfig::load_default()?;
     debugging!("Found tiny encrypt config: {:?}", config);
     let envelops = config.find_envelops(&cmd_encrypt.profile, &cmd_encrypt.key_filter)?;
     if envelops.is_empty() { return simple_error!("Cannot find any valid envelops"); }

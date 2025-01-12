@@ -13,7 +13,7 @@ use simpledateformat::format_human2;
 
 use crate::{config, util, util_enc_file, util_envelop};
 use crate::config::TinyEncryptConfig;
-use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM, TINY_ENC_CONFIG_FILE};
+use crate::consts::{DATE_TIME_FORMAT, TINY_ENC_AES_GCM};
 use crate::util::is_tiny_enc_file;
 use crate::wrap_key::WrapKey;
 
@@ -28,7 +28,7 @@ pub struct CmdInfo {
 }
 
 pub fn info(cmd_info: CmdInfo) -> XResult<()> {
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
+    let config = TinyEncryptConfig::load_default().ok();
     for (i, path) in cmd_info.paths.iter().enumerate() {
         let path = config::resolve_path_namespace(&config, path, true);
         if i > 0 { println!("{}", "-".repeat(88)); }

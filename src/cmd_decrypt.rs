@@ -31,7 +31,7 @@ use crate::consts::{
     ENC_AES256_GCM_KYBER1204, ENC_AES256_GCM_P256, ENC_AES256_GCM_P384,
     ENC_AES256_GCM_X25519, ENC_CHACHA20_POLY1305_KYBER1204, ENC_CHACHA20_POLY1305_P256,
     ENC_CHACHA20_POLY1305_P384, ENC_CHACHA20_POLY1305_X25519,
-    SALT_COMMENT, TINY_ENC_CONFIG_FILE, TINY_ENC_FILE_EXT,
+    SALT_COMMENT, TINY_ENC_FILE_EXT,
 };
 use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
@@ -105,7 +105,7 @@ impl Drop for CmdDecrypt {
 pub fn decrypt(cmd_decrypt: CmdDecrypt) -> XResult<()> {
     if cmd_decrypt.split_print { util_msg::set_logger_std_out(false); }
     debugging!("Cmd decrypt: {:?}", cmd_decrypt);
-    let config = TinyEncryptConfig::load(TINY_ENC_CONFIG_FILE).ok();
+    let config = TinyEncryptConfig::load_default().ok();
 
     let start = Instant::now();
     let mut succeed_count = 0;

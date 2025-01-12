@@ -1,14 +1,14 @@
-use std::{env, fs};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::{env, fs};
 
-use rust_util::{debugging, opt_result, simple_error, warning, XResult};
 use rust_util::util_file::resolve_file_path;
+use rust_util::{debugging, opt_result, simple_error, warning, XResult};
 use serde::{Deserialize, Serialize};
 
-use crate::consts::TINY_ENC_FILE_EXT;
+use crate::consts::{TINY_ENC_CONFIG_FILE, TINY_ENC_CONFIG_FILE_2, TINY_ENC_FILE_EXT};
 use crate::spec::TinyEncryptEnvelopType;
 
 /// Config file sample:
@@ -65,13 +65,34 @@ pub struct TinyEncryptConfigEnvelop {
 }
 
 impl TinyEncryptConfig {
+    pub fn load_default() -> XResult<Self> {
+        let resolved_file = resolve_file_path(TINY_ENC_CONFIG_FILE);
+        let resolved_file_2 = resolve_file_path(TINY_ENC_CONFIG_FILE_2);
+        let config_file = if fs::metadata(&resolved_file).is_ok() {
+            debugging!("Load config from: {resolved_file}");
+            resolved_file
+        } else if fs::metadata(&resolved_file_2).is_ok() {
+            debugging!("Load config from: {resolved_file_2}");
+            resolved_file_2
+        } else {
+            warning!("Cannot find config file from:\n- {resolved_file}\n- {resolved_file_2}");
+            resolved_file
+        };
+        Self::load(&config_file)
+    }
+
     pub fn load(file: &str) -> XResult<Self> {
         let resolved_file = resolve_file_path(file);
         let config_contents = opt_result!(
-            fs::read_to_string(resolved_file), "Read config file: {}, failed: {}", file
+            fs::read_to_string(resolved_file),
+            "Read config file: {}, failed: {}",
+            file
         );
         let mut config: TinyEncryptConfig = opt_result!(
-            serde_json::from_str(&config_contents),"Parse config file: {}, failed: {}", file);
+            serde_json::from_str(&config_contents),
+            "Parse config file: {}, failed: {}",
+            file
+        );
         let mut splited_profiles = HashMap::new();
         for (k, v) in config.profiles.into_iter() {
             if !k.contains(',') {
@@ -90,8 +111,8 @@ impl TinyEncryptConfig {
         if let Some(environment) = &config.environment {
             for (k, v) in environment {
                 let v = match v {
-                    StringOrVecString::String(s) => { s.to_string() }
-                    StringOrVecString::Vec(vs) => { vs.join(",") }
+                    StringOrVecString::String(s) => s.to_string(),
+                    StringOrVecString::Vec(vs) => vs.join(","),
                 };
                 debugging!("Set env: {}={}", k, v);
                 env::set_var(k, v);
@@ -104,10 +125,17 @@ impl TinyEncryptConfig {
     pub fn resolve_path_namespace(&self, path: &Path, append_te: bool) -> PathBuf {
         if let Some(path_str) = path.to_str() {
             if path_str.starts_with(':') {
-                let namespace = path_str.chars().skip(1)
-                    .take_while(|c| *c != ':').collect::<String>();
-                let mut filename = path_str.chars().skip(1)
-                    .skip_while(|c| *c != ':').skip(1).collect::<String>();
+                let namespace = path_str
+                    .chars()
+                    .skip(1)
+                    .take_while(|c| *c != ':')
+                    .collect::<String>();
+                let mut filename = path_str
+                    .chars()
+                    .skip(1)
+                    .skip_while(|c| *c != ':')
+                    .skip(1)
+                    .collect::<String>();
                 if append_te && !filename.ends_with(TINY_ENC_FILE_EXT) {
                     filename.push_str(TINY_ENC_FILE_EXT);
                 }
@@ -145,7 +173,10 @@ impl TinyEncryptConfig {
             }
             if k_filter.ends_with('*') {
                 let new_k_filter = k_filter.chars().collect::<Vec<_>>();
-                let new_k_filter = new_k_filter.iter().take(new_k_filter.len() - 1).collect::<String>();
+                let new_k_filter = new_k_filter
+                    .iter()
+                    .take(new_k_filter.len() - 1)
+                    .collect::<String>();
                 if e.kid.starts_with(&new_k_filter) || envelop_type.starts_with(&new_k_filter) {
                     return true;
                 }
@@ -155,18 +186,30 @@ impl TinyEncryptConfig {
     }
 
     pub fn find_by_kid_or_filter<F>(&self, kid: &str, f: F) -> Vec<&TinyEncryptConfigEnvelop>
-        where F: Fn(&TinyEncryptConfigEnvelop) -> bool {
-        self.envelops.iter().filter(|e| {
-            if e.kid == kid { return true; }
-            if let Some(sid) = &e.sid {
-                if sid == kid { return true; }
-            }
-            f(e)
-        }).collect()
+    where
+        F: Fn(&TinyEncryptConfigEnvelop) -> bool,
+    {
+        self.envelops
+            .iter()
+            .filter(|e| {
+                if e.kid == kid {
+                    return true;
+                }
+                if let Some(sid) = &e.sid {
+                    if sid == kid {
+                        return true;
+                    }
+                }
+                f(e)
+            })
+            .collect()
     }
 
-    pub fn find_envelops(&self, profile: &Option<String>, key_filter: &Option<String>)
-                         -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
+    pub fn find_envelops(
+        &self,
+        profile: &Option<String>,
+        key_filter: &Option<String>,
+    ) -> XResult<Vec<&TinyEncryptConfigEnvelop>> {
         debugging!("Profile: {:?}", profile);
         debugging!("Key filter: {:?}", key_filter);
         let mut matched_envelops_map = HashMap::new();
@@ -203,17 +246,29 @@ impl TinyEncryptConfig {
             return simple_error!("Profile or key filter cannot find any valid envelopes");
         }
         envelops.sort_by(|e1, e2| {
-            if e1.r#type < e2.r#type { return Ordering::Greater; }
-            if e1.r#type > e2.r#type { return Ordering::Less; }
-            if e1.kid < e2.kid { return Ordering::Greater; }
-            if e1.kid > e2.kid { return Ordering::Less; }
+            if e1.r#type < e2.r#type {
+                return Ordering::Greater;
+            }
+            if e1.r#type > e2.r#type {
+                return Ordering::Less;
+            }
+            if e1.kid < e2.kid {
+                return Ordering::Greater;
+            }
+            if e1.kid > e2.kid {
+                return Ordering::Less;
+            }
             Ordering::Equal
         });
         Ok(envelops)
     }
 }
 
-pub fn resolve_path_namespace(config: &Option<TinyEncryptConfig>, path: &Path, append_te: bool) -> PathBuf {
+pub fn resolve_path_namespace(
+    config: &Option<TinyEncryptConfig>,
+    path: &Path,
+    append_te: bool,
+) -> PathBuf {
     match config {
         None => path.to_path_buf(),
         Some(config) => config.resolve_path_namespace(path, append_te),
