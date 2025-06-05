@@ -9,6 +9,7 @@ use serde::Serialize;
 use std::io;
 use std::io::Write;
 use std::process::exit;
+use crate::util_simple_pbe::SimplePbkdfEncryptionV1;
 
 // Reference: https://git.hatter.ink/hatter/tiny-encrypt-rs/issues/3
 const SIMPLE_ENCRYPTION_HEADER: &str = "tinyencrypt-dir";
@@ -40,6 +41,14 @@ pub struct CmdSimpleEncrypt {
     #[arg(long)]
     pub value_hex: Option<String>,
 
+    /// With PBKDF encryption
+    #[arg(long, short = 'P')]
+    pub with_pbkdf_encryption: bool,
+
+    /// PBKDF encryption password
+    #[arg(long, short = 'A')]
+    pub password: Option<String>,
+
     /// Direct output result value
     #[arg(long)]
     pub direct_output: bool,
@@ -70,6 +79,10 @@ pub struct CmdSimpleDecrypt {
     /// Decrypt result output format (plain, hex, bse64)
     #[arg(long, short = 'o')]
     pub output_format: Option<String>,
+
+    /// PBKDF encryption password
+    #[arg(long, short = 'A')]
+    pub password: Option<String>,
 
     /// Direct output result value
     #[arg(long)]
@@ -186,10 +199,16 @@ pub fn inner_simple_encrypt(cmd_simple_encrypt: CmdSimpleEncrypt) -> XResult<()>
     let envelops = cmd_encrypt::encrypt_envelops(cryptor, &value, &envelops)?;
 
     let envelops_json = serde_json::to_string(&envelops)?;
-    let simple_encrypt_result = format!("{}.{}",
+    let mut simple_encrypt_result = format!("{}.{}",
                                         SIMPLE_ENCRYPTION_HEADER,
                                         URL_SAFE_NO_PAD.encode(envelops_json.as_bytes())
     );
+
+    let with_pbkdf_encryption = cmd_simple_encrypt.with_pbkdf_encryption || cmd_simple_encrypt.password.is_some();
+    if with_pbkdf_encryption {
+        let password = util::read_password(&cmd_simple_encrypt.password)?;
+        simple_encrypt_result = SimplePbkdfEncryptionV1::encrypt(&password, simple_encrypt_result.as_bytes())?.to_string();
+    }
 
     CmdResult::success(&simple_encrypt_result).print_exit(cmd_simple_encrypt.direct_output);
 }
@@ -207,10 +226,18 @@ pub fn inner_simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()>
         _ => return simple_error!("not supported output format: {}", output_format),
     };
 
-    let value = match cmd_simple_decrypt.get_value()? {
+    let mut value = match cmd_simple_decrypt.get_value()? {
         None => return simple_error!("--value-stdin/value must assign one"),
         Some(value) => value,
     };
+
+    if SimplePbkdfEncryptionV1::matches(&value) {
+        let simple_pbkdf_encryption_v1: SimplePbkdfEncryptionV1 = value.as_str().try_into()?;
+        let password = util::read_password(&cmd_simple_decrypt.password)?;
+        let plaintext_bytes = simple_pbkdf_encryption_v1.decrypt(&password)?;
+        value = opt_result!(String::from_utf8(plaintext_bytes), "Decrypt PBKDF encryption failed: {}");
+    }
+
     let value_parts = value.trim().split(SIMPLE_ENCRYPTION_DOT).collect::<Vec<_>>();
     if value_parts.len() != 2 {
         return simple_error!("bad value format: {}", value);
@@ -234,7 +261,13 @@ pub fn inner_simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()>
         return simple_error!("no envelops found: {:?}", cmd_simple_decrypt.key_id);
     }
     if filter_envelops.len() > 1 {
-        return simple_error!("too many envelops: {:?}, len: {}", cmd_simple_decrypt.key_id, filter_envelops.len());
+        let mut kids = vec![];
+        debugging!("Found {} envelopes", filter_envelops.len());
+        for envelop in &filter_envelops {
+            kids.push(envelop.kid.clone());
+            debugging!("- {} {}", envelop.kid, envelop.r#type.get_name());
+        }
+        return simple_error!("too many envelops: {:?}, len: {}, matched kids: [{}]", cmd_simple_decrypt.key_id, filter_envelops.len(), kids.join(","));
     }
     let value = crate::cmd_decrypt::try_decrypt_key(&config, filter_envelops[0], &pin, &slot, false)?;
     if cmd_simple_decrypt.direct_output && output_format == "plain" {

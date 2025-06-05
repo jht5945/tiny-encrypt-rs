@@ -62,6 +62,27 @@ pub fn read_pin(pin: &Option<String>) -> XResult<String> {
     Ok(rpin)
 }
 
+pub fn read_password(password: &Option<String>) -> XResult<String> {
+    let rpassword = match password {
+        Some(pin) => pin.to_string(),
+        None => {
+            let pin_entry = util_env::get_pin_entry().unwrap_or_else(|| "pinentry".to_string());
+            if let Some(mut input) = PassphraseInput::with_binary(pin_entry) {
+                let secret = input
+                    .with_description("Please input your password.")
+                    .with_prompt("Password:")
+                    .interact();
+                opt_result!(secret, "Read password from pinentry failed: {}")
+                    .expose_secret()
+                    .to_string()
+            } else {
+                opt_result!(rpassword::prompt_password("Please input password: "), "Read password failed: {}")
+            }
+        }
+    };
+    Ok(rpassword)
+}
+
 pub fn is_use_default_pin() -> bool {
     if util_env::get_no_default_pin_hint() {
         return false;

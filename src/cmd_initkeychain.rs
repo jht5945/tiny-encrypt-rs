@@ -1,10 +1,9 @@
 use clap::Args;
 use pqcrypto_traits::kem::PublicKey;
 use rust_util::{debugging, information, opt_result, simple_error, success, warning, XResult};
-
+use swift_secure_enclave_tool_rs::ControlFlag;
 use crate::config::TinyEncryptConfigEnvelop;
 use crate::spec::TinyEncryptEnvelopType;
-#[cfg(feature = "secure-enclave")]
 use crate::util_keychainkey;
 use crate::util_keychainstatic;
 use crate::util_keychainstatic::{KeychainKey, KeychainStaticSecret, KeychainStaticSecretAlgorithm};
@@ -14,6 +13,10 @@ pub struct CmdInitKeychain {
     /// Secure Enclave
     #[arg(long, short = 'S')]
     pub secure_enclave: bool,
+
+    /// Secure Enclave control flag, e.g. none, user-presence, device-passcode, biometry-any, biometry-current-set
+    #[arg(long, short = 'C')]
+    pub secure_enclave_control_flag: Option<String>,
 
     /// Expose secure enclave private key data
     #[arg(long, short = 'E')]
@@ -40,16 +43,12 @@ const DEFAULT_SERVICE_NAME: &str = "tiny-encrypt";
 
 pub fn init_keychain(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
     if cmd_init_keychain.secure_enclave {
-        #[cfg(feature = "secure-enclave")]
-        return keychain_key_se(cmd_init_keychain);
-        #[cfg(not(feature = "secure-enclave"))]
-        return simple_error!("Feature secure-enclave is not built");
+        keychain_key_se(cmd_init_keychain)
     } else {
         keychain_key_static(cmd_init_keychain)
     }
 }
 
-#[cfg(feature = "secure-enclave")]
 pub fn keychain_key_se(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
     if !util_keychainkey::is_support_se() {
         return simple_error!("Secure enclave is not supported.");
@@ -59,7 +58,19 @@ pub fn keychain_key_se(cmd_init_keychain: CmdInitKeychain) -> XResult<()> {
     let service_name = cmd_init_keychain.server_name.as_deref().unwrap_or(DEFAULT_SERVICE_NAME);
     let key_name = &cmd_init_keychain.key_name;
 
-    let (public_key_hex, private_key_base64) = util_keychainkey::generate_se_p256_keypair()?;
+    let control_flag = match &cmd_init_keychain.secure_enclave_control_flag {
+        None =>  return simple_error!("Parameter --secure-enclave-control-flag required"),
+        Some(control_flag) => match control_flag.as_str() {
+            "none" => ControlFlag::None,
+            "user-presence" | "up" => ControlFlag::UserPresence,
+            "device-passcode" | "passcode" | "pass" => ControlFlag::DevicePasscode,
+            "biometry-any" | "bio-any" => ControlFlag::BiometryAny,
+            "biometry-current-set" | "bio-current" => ControlFlag::BiometryCurrentSet,
+            _ => return simple_error!("Invalid control flag: {}", control_flag),
+        }
+    };
+
+    let (public_key_hex, private_key_base64) = util_keychainkey::generate_se_p256_keypair(control_flag)?;
     let public_key_compressed_hex = public_key_hex.chars()
         .skip(2).take(public_key_hex.len() / 2 - 1).collect::<String>();
     let saved_arg0 = if cmd_init_keychain.expose_secure_enclave_private_key {

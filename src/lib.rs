@@ -73,6 +73,6 @@ mod cmd_initpiv;
 mod util_keychainstatic;
 #[cfg(feature = "decrypt")]
 mod cmd_execenv;
-#[cfg(feature = "secure-enclave")]
 mod util_keychainkey;
+mod util_simple_pbe;
 

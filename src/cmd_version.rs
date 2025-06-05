@@ -1,8 +1,7 @@
 use clap::Args;
-use rust_util::XResult;
+use rust_util::{iff, XResult};
 
 use crate::util;
-#[cfg(feature = "secure-enclave")]
 use crate::util_keychainkey;
 
 #[derive(Debug, Args)]
@@ -16,13 +15,12 @@ pub fn version(_cmd_version: CmdVersion) -> XResult<()> {
     features.push("macos".to_string());
     #[cfg(feature = "smartcard")]
     features.push("smartcard".to_string());
-    #[cfg(feature = "secure-enclave")]
-    features.push(format!("secure-enclave{}", rust_util::iff!(util_keychainkey::is_support_se(), "*", "")));
     if features.is_empty() { features.push("-".to_string()); }
     println!(
-        "User-Agent: {} [with features: {}]\n{}",
+        "User-Agent: {} [with features: {}]{}\n{}",
         util::get_user_agent(),
         features.join(", "),
+        iff!(util_keychainkey::is_support_se(), " with Secure Enclave Supported", ""),
         env!("CARGO_PKG_DESCRIPTION")
     );
     Ok(())

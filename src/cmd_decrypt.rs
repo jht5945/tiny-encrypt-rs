@@ -37,7 +37,6 @@ use crate::crypto_cryptor::{Cryptor, KeyNonce};
 use crate::spec::{EncEncryptedMeta, TinyEncryptEnvelop, TinyEncryptEnvelopType, TinyEncryptMeta};
 use crate::util::SecVec;
 use crate::util_digest::DigestWrite;
-#[cfg(feature = "secure-enclave")]
 use crate::util_keychainkey;
 #[cfg(feature = "macos")]
 use crate::util_keychainstatic;
@@ -466,7 +465,6 @@ pub fn try_decrypt_key(config: &Option<TinyEncryptConfig>,
         #[cfg(feature = "macos")]
         TinyEncryptEnvelopType::StaticX25519 => try_decrypt_key_ecdh_static_x25519(config, envelop),
         TinyEncryptEnvelopType::PivP256 | TinyEncryptEnvelopType::PivP384 => try_decrypt_piv_key_ecdh(config, envelop, pin, slot, silent),
-        #[cfg(feature = "secure-enclave")]
         TinyEncryptEnvelopType::KeyP256 => try_decrypt_se_key_ecdh(config, envelop),
         TinyEncryptEnvelopType::PivRsa => try_decrypt_piv_key_rsa(config, envelop, pin, slot, silent),
         #[cfg(feature = "macos")]
@@ -553,7 +551,6 @@ fn try_decrypt_piv_key_rsa(config: &Option<TinyEncryptConfig>,
     Ok(after_2nd_0_bytes)
 }
 
-#[cfg(feature = "secure-enclave")]
 fn try_decrypt_se_key_ecdh(config: &Option<TinyEncryptConfig>,
                            envelop: &TinyEncryptEnvelop) -> XResult<Vec<u8>> {
     let wrap_key = WrapKey::parse(&envelop.encrypted_key)?;
@@ -572,9 +569,16 @@ fn try_decrypt_se_key_ecdh(config: &Option<TinyEncryptConfig>,
         return simple_error!("Not enough arguments for: {}", &envelop.kid);
     }
 
+    #[cfg(feature = "macos")]
     let private_key_base64 = if let Ok(keychain_key) = KeychainKey::parse(&config_envelop_args[0]) {
         let key = opt_value_result!(keychain_key.get_password()?, "Key: {} not found", &keychain_key.to_str());
         opt_result!(String::from_utf8(key), "Parse key failed: {}")
+    } else {
+        config_envelop_args[0].clone()
+    };
+    #[cfg(not(feature = "macos"))]
+    let private_key_base64 = if config_envelop_args[0].starts_with("keychain:") {
+        return simple_error!("Require macos feature: {}", &config_envelop_args[0]);
     } else {
         config_envelop_args[0].clone()
     };

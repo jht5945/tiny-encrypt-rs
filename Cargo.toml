@@ -1,6 +1,6 @@
 [package]
 name = "tiny-encrypt"
-version = "1.8.4"
+version = "1.9.3"
 edition = "2021"
 license = "MIT"
 description = "A simple and tiny file encrypt tool"
@@ -10,11 +10,10 @@ repository = "https://git.hatter.ink/hatter/tiny-encrypt-rs"
 
 [features]
 default = ["decrypt", "macos", "smartcard"]
-full-features = ["decrypt", "macos", "smartcard", "secure-enclave"]
+full-features = ["decrypt", "macos", "smartcard"]
 decrypt = ["smartcard"]
 smartcard = ["openpgp-card", "openpgp-card-pcsc", "yubikey"]
 macos = ["security-framework"]
-secure-enclave = ["macos", "swift-rs"]
 
 [dependencies]
 aes-gcm-stream = "0.2"
@@ -45,7 +44,6 @@ x25519-dalek = { version = "2.0", features = ["static_secrets", "getrandom"] }
 x509-parser = "0.16"
 yubikey = { version = "0.8", features = ["untested"], optional = true }
 zeroize = "1.7"
-swift-rs = { version = "1.0.7", optional = true }
 spki = "0.7"
 pqcrypto-kyber = "0.8"
 pqcrypto-traits = "0.3"
@@ -53,9 +51,7 @@ pinentry = "0.6"
 secrecy = "0.10"
 dialoguer = "0.11"
 ctrlc = "3.4"
-
-[build-dependencies]
-swift-rs = { version = "1.0.7", features = ["build"], optional = true }
+swift-secure-enclave-tool-rs = "1.0"
 
 [profile.release]
 codegen-units = 1
