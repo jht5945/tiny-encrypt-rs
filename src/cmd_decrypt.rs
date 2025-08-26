@@ -1,4 +1,4 @@
-use std::{env, fs};
+use std::fs;
 use std::env::temp_dir;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -16,6 +16,7 @@ use rust_util::{
     debugging, failure, iff, information, opt_result, opt_value_result, println_ex, simple_error, success,
     util_cmd, util_msg, util_size, util_time, warning, XResult,
 };
+use rust_util::util_env as rust_util_env;
 use rust_util::util_time::UnixEpochTime;
 use x509_parser::prelude::FromDer;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -327,12 +328,12 @@ fn run_file_editor_and_wait_content(editor: &str, temp_file: &PathBuf, secure_ed
 }
 
 fn get_file_editor() -> (bool, String) {
-    if let Ok(secure_editor) = env::var("SECURE_EDITOR") {
+    if let Some(secure_editor) = rust_util_env::env_var("SECURE_EDITOR") {
         // cmd <file-name> "aes-256-gcm" <key-in-hex> <nonce-in-hex>
         information!("Found secure editor: {}", &secure_editor);
         return (true, secure_editor);
     }
-    match env::var("EDITOR").ok() {
+    match rust_util_env::env_var("EDITOR") {
         Some(editor) => (false, editor),
         None => {
             warning!("EDITOR is not assigned, use default editor vi");

@@ -101,13 +101,15 @@ fn strip_field(kid: &str, max_len: usize) -> String {
 
 fn config_profiles(cmd_version: &CmdConfig, config: &TinyEncryptConfig) -> XResult<()> {
     let mut reverse_map = HashMap::new();
-    for (p, v) in &config.profiles {
-        let mut v2 = v.clone();
-        v2.sort();
-        let vs = v2.join(",");
-        match reverse_map.get_mut(&vs) {
-            None => { reverse_map.insert(vs, vec![(p, v)]); }
-            Some(vec) => { vec.push((p, v)); }
+    if let Some(profiles) = &config.profiles {
+        for (p, v) in profiles {
+            let mut v2 = v.clone();
+            v2.sort();
+            let vs = v2.join(",");
+            match reverse_map.get_mut(&vs) {
+                None => { reverse_map.insert(vs, vec![(p, v)]); }
+                Some(vec) => { vec.push((p, v)); }
+            }
         }
     }
 

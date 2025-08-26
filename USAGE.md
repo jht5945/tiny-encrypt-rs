@@ -133,5 +133,10 @@ tiny-encrypt -e [-p Profile] [-x] [-L 6] [-1] [-R] [-c Comment] [-C EncryptedCom
 tiny-encrypt -d [-p PIN] [-s Slot] [-R] FILENAMES
 ```
 
+## 5 Generate key(s)
 
+### 5.1 Generate SE based key(s)
+```shell
+tiny-encrypt init-keychain -S -C biometry-current-set -E --key-name <key-name>
+```
 

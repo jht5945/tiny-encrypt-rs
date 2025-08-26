@@ -3,12 +3,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::{env, fs};
-
+use rust_util::util_env as rust_util_env;
 use rust_util::util_file::resolve_file_path;
 use rust_util::{debugging, opt_result, simple_error, warning, XResult};
 use serde::{Deserialize, Serialize};
-
-use crate::consts::{TINY_ENC_CONFIG_FILE, TINY_ENC_CONFIG_FILE_2, TINY_ENC_FILE_EXT};
+use crate::consts::{ENV_TINY_ENC_CONFIG_FILE, TINY_ENC_CONFIG_FILE, TINY_ENC_CONFIG_FILE_2, TINY_ENC_CONFIG_FILE_3, TINY_ENC_FILE_EXT};
 use crate::spec::TinyEncryptEnvelopType;
 
 /// Config file sample:
@@ -39,8 +38,18 @@ use crate::spec::TinyEncryptEnvelopType;
 pub struct TinyEncryptConfig {
     pub environment: Option<HashMap<String, StringOrVecString>>,
     pub namespaces: Option<HashMap<String, String>>,
+    pub includes: Option<String>, // find all *.tinyencrypt.json
     pub envelops: Vec<TinyEncryptConfigEnvelop>,
-    pub profiles: HashMap<String, Vec<String>>,
+    pub profiles: Option<HashMap<String, Vec<String>>>,
+}
+
+impl TinyEncryptConfig {
+    fn get_profile(&self, profile: &str) -> Option<&Vec<String>> {
+        match &self.profiles {
+            Some(profiles) => profiles.get(profile),
+            None => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -66,17 +75,26 @@ pub struct TinyEncryptConfigEnvelop {
 
 impl TinyEncryptConfig {
     pub fn load_default() -> XResult<Self> {
-        let resolved_file = resolve_file_path(TINY_ENC_CONFIG_FILE);
+        let resolved_file0 = rust_util_env::env_var(ENV_TINY_ENC_CONFIG_FILE);
+        let resolved_file_1 = resolve_file_path(TINY_ENC_CONFIG_FILE);
         let resolved_file_2 = resolve_file_path(TINY_ENC_CONFIG_FILE_2);
-        let config_file = if fs::metadata(&resolved_file).is_ok() {
-            debugging!("Load config from: {resolved_file}");
-            resolved_file
+        let resolved_file_3 = resolve_file_path(TINY_ENC_CONFIG_FILE_3);
+        if let Some(resolved_file) = resolved_file0 {
+            debugging!("Found tiny encrypt config file: {}", &resolved_file);
+            return Self::load(&resolved_file)
+        }
+        let config_file = if fs::metadata(&resolved_file_1).is_ok() {
+            debugging!("Load config from: {resolved_file_1}");
+            resolved_file_1
         } else if fs::metadata(&resolved_file_2).is_ok() {
             debugging!("Load config from: {resolved_file_2}");
             resolved_file_2
+        }  else if fs::metadata(&resolved_file_3).is_ok() {
+            debugging!("Load config from: {resolved_file_3}");
+            resolved_file_3
         } else {
-            warning!("Cannot find config file from:\n- {resolved_file}\n- {resolved_file_2}");
-            resolved_file
+            warning!("Cannot find config file from:\n- {resolved_file_1}\n- {resolved_file_2}\n- {resolved_file_3}");
+            resolved_file_1
         };
         Self::load(&config_file)
     }
@@ -88,25 +106,31 @@ impl TinyEncryptConfig {
             "Read config file: {}, failed: {}",
             file
         );
-        let mut config: TinyEncryptConfig = opt_result!(
+        let config: TinyEncryptConfig = opt_result!(
             serde_json::from_str(&config_contents),
             "Parse config file: {}, failed: {}",
             file
         );
-        let mut splited_profiles = HashMap::new();
-        for (k, v) in config.profiles.into_iter() {
-            if !k.contains(',') {
-                splited_profiles.insert(k, v);
-            } else {
-                k.split(',')
-                    .map(|k| k.trim())
-                    .filter(|k| !k.is_empty())
-                    .for_each(|k| {
-                        splited_profiles.insert(k.to_string(), v.clone());
-                    });
+        debugging!("Config: {:#?}", config);
+        let mut config = load_includes_and_merge(config);
+        debugging!("Final config: {:#?}", config);
+
+        if let Some(profiles) = config.profiles {
+            let mut splited_profiles = HashMap::new();
+            for (k, v) in profiles.into_iter() {
+                if !k.contains(',') {
+                    splited_profiles.insert(k, v);
+                } else {
+                    k.split(',')
+                        .map(|k| k.trim())
+                        .filter(|k| !k.is_empty())
+                        .for_each(|k| {
+                            splited_profiles.insert(k.to_string(), v.clone());
+                        });
+                }
             }
+            config.profiles = Some(splited_profiles);
         }
-        config.profiles = splited_profiles;
 
         if let Some(environment) = &config.environment {
             for (k, v) in environment {
@@ -220,7 +244,7 @@ impl TinyEncryptConfig {
                 self.envelops.iter().for_each(|e| {
                     key_ids.push(e.kid.to_string());
                 });
-            } else if let Some(kids) = self.profiles.get(profile) {
+            } else if let Some(kids) = self.get_profile(profile) {
                 kids.iter().for_each(|k| key_ids.push(k.to_string()));
             }
         }
@@ -273,4 +297,151 @@ pub fn resolve_path_namespace(
         None => path.to_path_buf(),
         Some(config) => config.resolve_path_namespace(path, append_te),
     }
+}
+
+pub fn load_includes_and_merge(mut config: TinyEncryptConfig) -> TinyEncryptConfig {
+    debugging!("Config includes: {:?}", &config.includes);
+    if let Some(includes) = &config.includes {
+        let sub_configs = search_include_configs(includes);
+        debugging!(
+            "Found {} sub configs, detail {:?}",
+            sub_configs.len(),
+            sub_configs
+        );
+        for sub_config in &sub_configs {
+            // merge environment
+            if let Some(sub_environment) = &sub_config.environment {
+                match &mut config.environment {
+                    None => {
+                        config.environment = Some(sub_environment.clone());
+                    }
+                    Some(env) => {
+                        for (k, v) in sub_environment {
+                            match env.get_mut(k) {
+                                None => {
+                                    env.insert(k.clone(), v.clone());
+                                }
+                                Some(env_val) => {
+                                    match (env_val, v) {
+                                        (StringOrVecString::Vec(env_value_vec), StringOrVecString::Vec(v_vec)) => {
+                                            for vv in v_vec {
+                                                if !env_value_vec.contains(vv) {
+                                                    env_value_vec.push(vv.clone());
+                                                }
+                                            }
+                                        }
+                                        _ => {
+                                            warning!("Duplicate or mis-match environment value, key: {}", k);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // merge profiles
+            for sub_envelop in &sub_config.envelops {
+                let filter_envelops = config.envelops.iter().filter(|e| {
+                    e.kid == sub_envelop.kid || (e.sid.is_some() && e.sid == sub_envelop.sid)
+                }).collect::<Vec<_>>();
+                if !filter_envelops.is_empty() {
+                    warning!("Duplication kid: {} or sid: {:?}", sub_envelop.kid, sub_envelop.sid);
+                    continue;
+                }
+                config.envelops.push(sub_envelop.clone());
+            }
+            // merge profiles
+            if let Some(sub_profiles) = &sub_config.profiles {
+                match &mut config.profiles {
+                    None => {
+                        config.profiles = Some(sub_profiles.clone());
+                    }
+                    Some(profiles) => {
+                        for (k, v) in sub_profiles {
+                            match profiles.get_mut(k) {
+                                None => {
+                                    profiles.insert(k.clone(), v.clone());
+                                }
+                                Some(env_val) => {
+                                    for vv in v {
+                                        env_val.push(vv.clone());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(profiles) = &mut config.profiles {
+        let all_key_ids = config.envelops.iter().map(|e| e.kid.clone()).collect::<Vec<_>>();
+        if profiles.contains_key("__all__") {
+            warning!("Key __all__ in profiles exists")
+        } else {
+            profiles.insert("__all__".to_string(), all_key_ids);
+        }
+    }
+    config
+}
+
+pub fn search_include_configs(includes_path: &str) -> Vec<TinyEncryptConfig> {
+    let includes_path = if includes_path.starts_with("$") {
+        let includes_path_env_var = includes_path.chars().skip(1).collect::<String>();
+        match rust_util_env::env_var(&includes_path_env_var) {
+            Some(includes_path) => includes_path,
+            None => {
+                warning!("Cannot find env var: {}", &includes_path_env_var);
+                return vec![];
+            }
+        }
+    } else {
+        includes_path.to_string()
+    };
+
+    let includes_path = &includes_path;
+    let mut sub_configs = vec![];
+    let read_dir = match fs::read_dir(includes_path) {
+        Ok(read_dir) => read_dir,
+        Err(e) => {
+            warning!("Read dir: {}, failed: {}", includes_path, e);
+            return sub_configs;
+        }
+    };
+    for entry in read_dir {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                warning!("Read dir: {} entry, failed: {}", includes_path, e);
+                continue;
+            }
+        };
+        let file_name = entry.file_name();
+        let file_name = file_name.to_str();
+        let file_name = match file_name {
+            Some(file_name) => file_name,
+            None => continue,
+        };
+        if file_name.ends_with(".tinyencrypt.json") {
+            debugging!("Matches config file: {}", file_name);
+            let file_path = entry.path();
+            let content = match fs::read_to_string(entry.path()) {
+                Ok(content) => content,
+                Err(e) => {
+                    warning!("Read config file: {:?}, failed: {}", file_path, e);
+                    continue;
+                }
+            };
+            let config = match serde_json::from_str::<TinyEncryptConfig>(&content) {
+                Ok(config) => config,
+                Err(e) => {
+                    warning!("Parse config file: {:?}, failed: {}", file_path, e);
+                    continue;
+                }
+            };
+            sub_configs.push(config);
+        }
+    }
+    sub_configs
 }

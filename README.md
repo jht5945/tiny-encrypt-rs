@@ -153,6 +153,7 @@ Environment
 
 | KEY                              | Comment                                     |
 |----------------------------------|---------------------------------------------|
+| TINY_ENCRYPT_CONFIG_FILE         | Config file                                 |
 | TINY_ENCRYPT_DEFAULT_ALGORITHM   | Encryption algorithm, `aes` or `chacha20`   |
 | TINY_ENCRYPT_DEFAULT_COMPRESS    | File compress, `1` or `on`, default `false` |
 | TINY_ENCRYPT_NO_PROGRESS         | Do not display progress bar                 |
@@ -165,5 +166,4 @@ Environment
 | TINY_ENCRYPT_PIN_ENTRY           | PIN entry command cli                       |
 | SECURE_EDITOR                    | Secure Editor                               |
 | EDITOR                           | Editor (Plaintext)                          |
-
 

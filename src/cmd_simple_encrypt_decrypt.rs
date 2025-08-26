@@ -51,6 +51,10 @@ pub struct CmdSimpleEncrypt {
 
     /// Direct output result value
     #[arg(long)]
+    pub outputs_password: bool,
+
+    /// Direct output result value
+    #[arg(long)]
     pub direct_output: bool,
 }
 
@@ -83,6 +87,10 @@ pub struct CmdSimpleDecrypt {
     /// PBKDF encryption password
     #[arg(long, short = 'A')]
     pub password: Option<String>,
+
+    /// Direct output result value
+    #[arg(long)]
+    pub outputs_password: bool,
 
     /// Direct output result value
     #[arg(long)]
@@ -122,6 +130,8 @@ pub struct CmdResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
 }
 
@@ -130,14 +140,16 @@ impl CmdResult {
         Self {
             code,
             message: Some(message.to_string()),
+            password: None,
             result: None,
         }
     }
 
-    pub fn success(result: &str) -> Self {
+    pub fn success(result: &str, password: Option<String>) -> Self {
         Self {
             code: 0,
             message: None,
+            password,
             result: Some(result.to_string()),
         }
     }
@@ -205,12 +217,16 @@ pub fn inner_simple_encrypt(cmd_simple_encrypt: CmdSimpleEncrypt) -> XResult<()>
     );
 
     let with_pbkdf_encryption = cmd_simple_encrypt.with_pbkdf_encryption || cmd_simple_encrypt.password.is_some();
+    let mut outputs_password = None;
     if with_pbkdf_encryption {
         let password = util::read_password(&cmd_simple_encrypt.password)?;
         simple_encrypt_result = SimplePbkdfEncryptionV1::encrypt(&password, simple_encrypt_result.as_bytes())?.to_string();
+        if cmd_simple_encrypt.outputs_password {
+            outputs_password = Some(password);
+        }
     }
 
-    CmdResult::success(&simple_encrypt_result).print_exit(cmd_simple_encrypt.direct_output);
+    CmdResult::success(&simple_encrypt_result, outputs_password).print_exit(cmd_simple_encrypt.direct_output);
 }
 
 #[cfg(feature = "decrypt")]
@@ -231,11 +247,15 @@ pub fn inner_simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()>
         Some(value) => value,
     };
 
+    let mut outputs_password = None;
     if SimplePbkdfEncryptionV1::matches(&value) {
         let simple_pbkdf_encryption_v1: SimplePbkdfEncryptionV1 = value.as_str().try_into()?;
         let password = util::read_password(&cmd_simple_decrypt.password)?;
         let plaintext_bytes = simple_pbkdf_encryption_v1.decrypt(&password)?;
         value = opt_result!(String::from_utf8(plaintext_bytes), "Decrypt PBKDF encryption failed: {}");
+        if cmd_simple_decrypt.outputs_password {
+            outputs_password = Some(password);
+        }
     }
 
     let value_parts = value.trim().split(SIMPLE_ENCRYPTION_DOT).collect::<Vec<_>>();
@@ -280,5 +300,5 @@ pub fn inner_simple_decrypt(cmd_simple_decrypt: CmdSimpleDecrypt) -> XResult<()>
         "base64" => STANDARD.encode(&value),
         _ => return simple_error!("not supported output format: {}", output_format),
     };
-    CmdResult::success(&value).print_exit(cmd_simple_decrypt.direct_output);
+    CmdResult::success(&value, outputs_password).print_exit(cmd_simple_decrypt.direct_output);
 }

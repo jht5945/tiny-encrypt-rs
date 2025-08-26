@@ -40,23 +40,29 @@ pub fn read_stdin() -> XResult<Vec<u8>> {
 }
 
 pub fn read_pin(pin: &Option<String>) -> XResult<String> {
-    let rpin = match pin {
-        Some(pin) => pin.to_string(),
-        None => if is_use_default_pin() {
-            "123456".into()
+    let mut ask_use_default_pin = true;
+    if let Some(pin) = pin {
+        if pin == "#INPUT#" {
+            ask_use_default_pin = false;
         } else {
-            let pin_entry = util_env::get_pin_entry().unwrap_or_else(|| "pinentry".to_string());
-            if let Some(mut input) = PassphraseInput::with_binary(pin_entry) {
-                let secret = input
-                    .with_description("Please input your PIN.")
-                    .with_prompt("PIN:")
-                    .interact();
-                opt_result!(secret, "Read PIN from pinentry failed: {}")
-                    .expose_secret()
-                    .to_string()
-            } else {
-                opt_result!(rpassword::prompt_password("Please input PIN: "), "Read PIN failed: {}")
-            }
+            return Ok(pin.to_string());
+        }
+    }
+    if ask_use_default_pin && is_use_default_pin() {
+        return Ok("123456".into());
+    }
+    let rpin = {
+        let pin_entry = util_env::get_default_pin_entry().unwrap_or_else(|| "pinentry".to_string());
+        if let Some(mut input) = PassphraseInput::with_binary(pin_entry) {
+            let secret = input
+                .with_description("Please input your PIN.")
+                .with_prompt("PIN:")
+                .interact();
+            opt_result!(secret, "Read PIN from pinentry failed: {}")
+                .expose_secret()
+                .to_string()
+        } else {
+            opt_result!(rpassword::prompt_password("Please input PIN: "), "Read PIN failed: {}")
         }
     };
     Ok(rpin)
@@ -66,7 +72,7 @@ pub fn read_password(password: &Option<String>) -> XResult<String> {
     let rpassword = match password {
         Some(pin) => pin.to_string(),
         None => {
-            let pin_entry = util_env::get_pin_entry().unwrap_or_else(|| "pinentry".to_string());
+            let pin_entry = util_env::get_default_pin_entry().unwrap_or_else(|| "pinentry".to_string());
             if let Some(mut input) = PassphraseInput::with_binary(pin_entry) {
                 let secret = input
                     .with_description("Please input your password.")

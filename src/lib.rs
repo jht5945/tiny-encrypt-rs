@@ -35,6 +35,7 @@ pub use cmd_initpiv::init_piv;
 pub use cmd_version::CmdVersion;
 pub use cmd_version::version;
 pub use config::TinyEncryptConfig;
+pub use util_log::init_tiny_encrypt_log;
 
 mod consts;
 mod util;
@@ -75,4 +76,5 @@ mod util_keychainstatic;
 mod cmd_execenv;
 mod util_keychainkey;
 mod util_simple_pbe;
+mod util_log;
 

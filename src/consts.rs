@@ -11,8 +11,10 @@ pub const ENC_CHACHA20_POLY1305_KYBER1204: &str = "chacha20-poly1305-kyber1204";
 // Extend and config file
 pub const TINY_ENC_FILE_EXT: &str = ".tinyenc";
 pub const TINY_ENC_PEM_FILE_EXT: &str = ".tinyenc.pem";
+pub const ENV_TINY_ENC_CONFIG_FILE: &str = "TINY_ENCRYPT_CONFIG_FILE";
 pub const TINY_ENC_CONFIG_FILE: &str = "~/.tinyencrypt/config-rs.json";
-pub const TINY_ENC_CONFIG_FILE_2: &str = "/etc/tinyencrypt/config-rs.json";
+pub const TINY_ENC_CONFIG_FILE_2: &str = "~/.config/tinyencrypt-rs.json";
+pub const TINY_ENC_CONFIG_FILE_3: &str = "/etc/tinyencrypt/config-rs.json";
 
 pub const TINY_ENC_PEM_NAME: &str = "TINY ENCRYPT";
 

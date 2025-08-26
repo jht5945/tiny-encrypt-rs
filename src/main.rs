@@ -11,7 +11,7 @@ use tiny_encrypt::CmdExecEnv;
 use tiny_encrypt::CmdInitKeychain;
 #[cfg(feature = "smartcard")]
 use tiny_encrypt::CmdInitPiv;
-use tiny_encrypt::{CmdConfig, CmdDirectDecrypt, CmdEncrypt, CmdInfo, CmdSimpleDecrypt, CmdSimpleEncrypt, CmdVersion};
+use tiny_encrypt::{init_tiny_encrypt_log, CmdConfig, CmdDirectDecrypt, CmdEncrypt, CmdInfo, CmdSimpleDecrypt, CmdSimpleEncrypt, CmdVersion};
 
 #[derive(Debug, Parser)]
 #[command(name = "tiny-encrypt-rs")]
@@ -64,6 +64,8 @@ enum Commands {
 }
 
 fn main() -> XResult<()> {
+    init_tiny_encrypt_log();
+
     let args = Cli::parse();
     match args.command {
         Commands::Encrypt(cmd_encrypt) => tiny_encrypt::encrypt(cmd_encrypt),
